@@ -3,25 +3,74 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
 model User {
-  id               String    @id @default(uuid())
-  email            String    @unique
-  username         String?   @unique
+  id               String      @id @default(uuid())
+  email            String      @unique
+  username         String?     @unique
   fullName         String?
   password         String
   secretQuestion   String?
   secretAnswer     String?
   referralCode     String?
-  role             String    @default("USER") // "USER" or "ADMIN"
-  isEmailVerified  Boolean   @default(true)
+  role             String      @default("USER") // "USER" or "ADMIN"
+  isEmailVerified  Boolean     @default(true)
   otpCode          String?
   otpExpiresAt     DateTime?
-  balance          Float     @default(0)
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
+  balance          Float       @default(0)
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+
+  emailLogs        EmailLog[]
 }
 
+model EmailSettings {
+  id                           String   @id @default(uuid())
+  smtp_host                    String   @default("smtp.gmail.com")
+  smtp_port                    Int      @default(587)
+  smtp_user                    String   @default("")
+  smtp_pass                    String   @default("")
+  from_email                   String   @default("noreply@digitalxtrade.vip")
+  from_name                    String   @default("DigitalXTrade Protocol")
+  
+  notify_deposit_processing     Boolean  @default(true)
+  notify_deposit_approved       Boolean  @default(true)
+  notify_deposit_rejected       Boolean  @default(true)
+  notify_withdrawal_processing  Boolean  @default(true)
+  notify_withdrawal_approved    Boolean  @default(true)
+  notify_withdrawal_rejected    Boolean  @default(true)
+  notify_profit_return          Boolean  @default(true)
+
+  updatedAt                    DateTime @updatedAt
+
+  @@map("email_settings")
+}
+
+model EmailLog {
+  id          String   @id @default(uuid())
+  user_id     String?
+  recipient   String
+  subject     String
+  email_type  String
+  status      String
+  sent_at     DateTime @default(now())
+  error_msg   String?
+
+  user        User?    @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@map("email_logs")
+}
+
+model Settings {
+  id              String   @id @default(uuid())
+  site_name       String   @default("DigitalXTrade")
+  site_title      String   @default("DigitalXTrade - Next Gen Crypto Staking & Trading Protocol")
+  site_logo       String?
+  site_url        String   @default("https://digitalxtrade.vip")
+  updatedAt       DateTime @updatedAt
+
+  @@map("settings")
+}

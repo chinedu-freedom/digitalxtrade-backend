@@ -2,6 +2,7 @@ import express from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import prisma from '../lib/prisma.js';
+import { sendEmail } from '../services/emailService.js';
 
 const router = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET || 'digital-project-secret-key-2026';
@@ -84,7 +85,7 @@ router.post('/register', async (req, res) => {
 router.post(['/login', '/admin/login'], async (req, res) => {
   try {
     const { email, username, password, remember_me, remember } = req.body;
-    const identifier = (email || username || '').toLowerCase().trim();
+    const identifier = (email || username || '').trim();
 
     if (!identifier || !password) {
       return res.status(400).json({ success: false, message: 'Email and password are required' });
@@ -93,8 +94,8 @@ router.post(['/login', '/admin/login'], async (req, res) => {
     let user = await prisma.user.findFirst({
       where: {
         OR: [
-          { email: identifier },
-          { username: identifier }
+          { email: { equals: identifier, mode: 'insensitive' } },
+          { username: { equals: identifier, mode: 'insensitive' } }
         ]
       }
     });
@@ -271,7 +272,7 @@ router.post('/reset-password', async (req, res) => {
 router.post('/admin/login', async (req, res) => {
   try {
     const { username, email, password } = req.body;
-    const identifier = (username || email || '').toLowerCase().trim();
+    const identifier = (username || email || '').trim();
 
     if (!identifier || !password) {
       return res.status(400).json({ success: false, message: 'Username/email and password are required' });
@@ -280,8 +281,8 @@ router.post('/admin/login', async (req, res) => {
     let adminUser = await prisma.user.findFirst({
       where: {
         OR: [
-          { email: identifier },
-          { username: identifier }
+          { email: { equals: identifier, mode: 'insensitive' } },
+          { username: { equals: identifier, mode: 'insensitive' } }
         ],
         role: 'ADMIN'
       }
@@ -323,6 +324,117 @@ router.post('/admin/login', async (req, res) => {
   } catch (error) {
     console.error('Admin login error:', error);
     return res.status(500).json({ success: false, message: 'Server error during admin login' });
+  }
+});
+
+// GET /api/admin/settings/email
+router.get('/admin/settings/email', async (req, res) => {
+  try {
+    let settings = await prisma.emailSettings.findFirst();
+    if (!settings) {
+      settings = {
+        smtp_host: process.env.SMTP_HOST || 'smtp.gmail.com',
+        smtp_port: parseInt(process.env.SMTP_PORT || '587'),
+        smtp_user: process.env.SMTP_USER || '',
+        smtp_pass: process.env.SMTP_PASS || '',
+        from_email: process.env.FROM_EMAIL || 'noreply@digitalxtrade.vip',
+        from_name: process.env.FROM_NAME || 'DigitalXTrade Protocol',
+      };
+    }
+    return res.json({ success: true, settings });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: 'Failed to fetch email settings', error: error.message });
+  }
+});
+
+// POST /api/admin/settings/email
+router.post('/admin/settings/email', async (req, res) => {
+  try {
+    const { smtp_host, smtp_port, smtp_user, smtp_pass, from_email, from_name } = req.body;
+    const existing = await prisma.emailSettings.findFirst();
+
+    let settings;
+    if (existing) {
+      settings = await prisma.emailSettings.update({
+        where: { id: existing.id },
+        data: {
+          smtp_host: smtp_host || 'smtp.gmail.com',
+          smtp_port: parseInt(smtp_port) || 587,
+          smtp_user: smtp_user || '',
+          smtp_pass: smtp_pass || '',
+          from_email: from_email || 'noreply@digitalxtrade.vip',
+          from_name: from_name || 'DigitalXTrade Protocol',
+        },
+      });
+    } else {
+      settings = await prisma.emailSettings.create({
+        data: {
+          smtp_host: smtp_host || 'smtp.gmail.com',
+          smtp_port: parseInt(smtp_port) || 587,
+          smtp_user: smtp_user || '',
+          smtp_pass: smtp_pass || '',
+          from_email: from_email || 'noreply@digitalxtrade.vip',
+          from_name: from_name || 'DigitalXTrade Protocol',
+        },
+      });
+    }
+
+    return res.json({ success: true, message: 'Email configuration saved successfully', settings });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: 'Failed to save email settings', error: error.message });
+  }
+});
+
+// POST /api/admin/users/send-notification
+router.post('/admin/users/send-notification', async (req, res) => {
+  try {
+    const { subject, message, target_users, batch_size, cooling_period } = req.body;
+
+    if (!subject || !message) {
+      return res.status(400).json({ success: false, message: 'Subject and message body are required' });
+    }
+
+    const batchSize = parseInt(batch_size) || 10;
+    const delaySeconds = parseInt(cooling_period) || 2;
+
+    const where = {};
+    if (target_users === 'Email Unverified') where.isEmailVerified = false;
+
+    const allUsers = await prisma.user.findMany({
+      where,
+      select: { id: true, email: true, fullName: true, username: true },
+    });
+
+    res.json({
+      success: true,
+      message: `Notification dispatch initiated for ${allUsers.length} users in batches of ${batchSize}.`,
+      totalUsers: allUsers.length,
+    });
+
+    // Background Async Dispatcher
+    (async () => {
+      for (let i = 0; i < allUsers.length; i += batchSize) {
+        const currentBatch = allUsers.slice(i, i + batchSize);
+
+        await Promise.all(
+          currentBatch.map((u) =>
+            sendEmail({
+              to: u.email,
+              subject: subject,
+              html: `<h2>${subject}</h2><p>Dear ${u.fullName || u.username || 'Valued User'},</p><div>${message}</div>`,
+              emailType: 'BROADCAST',
+              userId: u.id,
+            }).catch(() => null)
+          )
+        );
+
+        if (i + batchSize < allUsers.length && delaySeconds > 0) {
+          await new Promise((resolve) => setTimeout(resolve, delaySeconds * 1000));
+        }
+      }
+    })().catch((err) => console.error('Batch notification error:', err));
+  } catch (error) {
+    return res.status(500).json({ success: false, message: 'Failed to initiate batch notification', error: error.message });
   }
 });
 

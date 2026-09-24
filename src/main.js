@@ -11,8 +11,9 @@ const PORT = process.env.PORT || 3001;
 app.use(cors());
 app.use(express.json());
 
-// API Auth Routes
+// API Auth and Admin Routes
 app.use('/api/auth', authRoutes);
+app.use('/api', authRoutes);
 
 // Health Check Endpoint
 app.get('/api/health', (req, res) => {
