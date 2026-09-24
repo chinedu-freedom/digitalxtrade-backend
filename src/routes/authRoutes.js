@@ -83,7 +83,7 @@ router.post('/register', async (req, res) => {
 // POST /api/auth/login
 router.post('/login', async (req, res) => {
   try {
-    const { email, username, password } = req.body;
+    const { email, username, password, remember_me, remember } = req.body;
     const identifier = (email || username || '').toLowerCase().trim();
 
     if (!identifier || !password) {
@@ -123,12 +123,15 @@ router.post('/login', async (req, res) => {
       return res.status(401).json({ success: false, message: 'Invalid email or password' });
     }
 
-    const token = jwt.sign({ id: user.id, email: user.email, role: user.role }, JWT_SECRET, { expiresIn: '7d' });
+    const isRemember = Boolean(remember_me || remember);
+    const expiresIn = isRemember ? '24h' : '1h';
+    const token = jwt.sign({ id: user.id, email: user.email, role: user.role }, JWT_SECRET, { expiresIn });
 
     return res.json({
       success: true,
       message: 'Login successful',
       token,
+      expiresIn,
       user: formatUser(user),
     });
   } catch (error) {
