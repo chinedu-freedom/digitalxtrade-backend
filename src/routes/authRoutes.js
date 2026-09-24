@@ -272,6 +272,10 @@ router.post('/admin/login', async (req, res) => {
     const { username, email, password } = req.body;
     const identifier = (username || email || '').toLowerCase().trim();
 
+    if (!identifier || !password) {
+      return res.status(400).json({ success: false, message: 'Username/email and password are required' });
+    }
+
     let adminUser = await prisma.user.findFirst({
       where: {
         OR: [
@@ -283,17 +287,28 @@ router.post('/admin/login', async (req, res) => {
     });
 
     if (!adminUser) {
-      const hashedPassword = await bcrypt.hash(password || 'admin123', 10);
-      adminUser = await prisma.user.create({
-        data: {
-          email: identifier.includes('@') ? identifier : 'admin@stakelab.io',
-          username: 'admin',
-          fullName: 'Super Administrator',
-          password: hashedPassword,
-          role: 'ADMIN',
-          isEmailVerified: true,
-        }
-      });
+      // Auto-create initial default admin on first admin login if none exists
+      const adminCount = await prisma.user.count({ where: { role: 'ADMIN' } });
+      if (adminCount === 0 && (identifier === 'admin' || identifier === 'admin@digitalxtrade.com' || identifier === 'admin@stakelab.io')) {
+        const hashedPassword = await bcrypt.hash(password || 'admin123', 10);
+        adminUser = await prisma.user.create({
+          data: {
+            email: identifier.includes('@') ? identifier : 'admin@digitalxtrade.com',
+            username: 'admin',
+            fullName: 'Super Administrator',
+            password: hashedPassword,
+            role: 'ADMIN',
+            isEmailVerified: true,
+          }
+        });
+      } else {
+        return res.status(401).json({ success: false, message: 'Invalid username or password' });
+      }
+    }
+
+    const isMatch = await bcrypt.compare(password, adminUser.password);
+    if (!isMatch) {
+      return res.status(401).json({ success: false, message: 'Invalid username or password' });
     }
 
     const token = jwt.sign({ id: adminUser.id, email: adminUser.email, role: 'ADMIN' }, JWT_SECRET, { expiresIn: '7d' });
