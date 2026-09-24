@@ -26,3 +26,9 @@ yarn-error.log*
 Thumbs.db
 .idea/
 .vscode/
+
+# SQLite Databases
+*.db
+*.db-journal
+dev.db
+
