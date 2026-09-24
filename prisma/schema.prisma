@@ -3,16 +3,25 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
 model User {
-  id        String   @id @default(uuid())
-  email     String   @unique
-  name      String?
-  password  String
-  role      String   @default("USER")
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id               String    @id @default(uuid())
+  email            String    @unique
+  username         String?   @unique
+  fullName         String?
+  password         String
+  secretQuestion   String?
+  secretAnswer     String?
+  referralCode     String?
+  role             String    @default("USER") // "USER" or "ADMIN"
+  isEmailVerified  Boolean   @default(true)
+  otpCode          String?
+  otpExpiresAt     DateTime?
+  balance          Float     @default(0)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 }
+
