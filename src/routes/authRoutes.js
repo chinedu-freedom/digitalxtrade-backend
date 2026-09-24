@@ -115,12 +115,12 @@ router.post('/login', async (req, res) => {
     }
 
     if (!user) {
-      return res.status(401).json({ success: false, message: 'Invalid email or password' });
+      return res.status(401).json({ success: false, message: 'Invalid username or password' });
     }
 
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
-      return res.status(401).json({ success: false, message: 'Invalid email or password' });
+      return res.status(401).json({ success: false, message: 'Invalid username or password' });
     }
 
     const isRemember = Boolean(remember_me || remember);
