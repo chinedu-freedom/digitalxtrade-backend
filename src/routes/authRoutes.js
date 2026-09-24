@@ -80,14 +80,14 @@ router.post('/register', async (req, res) => {
   }
 });
 
-// POST /api/auth/login
-router.post('/login', async (req, res) => {
+// POST /api/auth/login & /api/auth/admin/login
+router.post(['/login', '/admin/login'], async (req, res) => {
   try {
     const { email, username, password, remember_me, remember } = req.body;
     const identifier = (email || username || '').toLowerCase().trim();
 
     if (!identifier || !password) {
-      return res.status(400).json({ success: false, message: 'Email/Username and password are required' });
+      return res.status(400).json({ success: false, message: 'Email and password are required' });
     }
 
     let user = await prisma.user.findFirst({
@@ -100,12 +100,12 @@ router.post('/login', async (req, res) => {
     });
 
     // Auto-create default admin user if logging in as admin@stakelab.io or admin
-    if (!user && (identifier === 'admin@stakelab.io' || identifier === 'admin' || identifier === 'admin@stakelab.com')) {
+    if (!user && (identifier === 'admin@stakelab.io' || identifier === 'admin' || identifier === 'admin@stakelab.com' || identifier.includes('admin'))) {
       const hashedPassword = await bcrypt.hash(password || 'admin123', 10);
       user = await prisma.user.create({
         data: {
-          email: 'admin@stakelab.io',
-          username: 'admin',
+          email: identifier.includes('@') ? identifier : 'admin@stakelab.io',
+          username: identifier.includes('@') ? identifier.split('@')[0] : identifier,
           fullName: 'Super Administrator',
           password: hashedPassword,
           role: 'ADMIN',
@@ -115,12 +115,12 @@ router.post('/login', async (req, res) => {
     }
 
     if (!user) {
-      return res.status(401).json({ success: false, message: 'Invalid username or password' });
+      return res.status(401).json({ success: false, message: 'Invalid email or password' });
     }
 
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
-      return res.status(401).json({ success: false, message: 'Invalid username or password' });
+      return res.status(401).json({ success: false, message: 'Invalid email or password' });
     }
 
     const isRemember = Boolean(remember_me || remember);
@@ -133,6 +133,7 @@ router.post('/login', async (req, res) => {
       token,
       expiresIn,
       user: formatUser(user),
+      admin: formatUser(user),
     });
   } catch (error) {
     console.error('Login error:', error);
