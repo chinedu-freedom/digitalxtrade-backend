@@ -27,8 +27,8 @@ Thumbs.db
 .idea/
 .vscode/
 
-# SQLite Databases
+# Database dev files
 *.db
+*.sqlite
 *.db-journal
 dev.db
-
