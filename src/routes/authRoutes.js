@@ -71,6 +71,15 @@ router.post('/register', async (req, res) => {
       }
     });
 
+    // Send Welcome Email asynchronously
+    sendEmail({
+      to: newUser.email,
+      subject: 'Welcome to DigitalXTrade Protocol',
+      html: `<p>Dear <strong>${newUser.fullName || newUser.username}</strong>,</p><p>Welcome to DigitalXTrade! Your account has been registered successfully.</p><p>You can now log in to your account and explore our investment opportunities.</p>`,
+      emailType: 'WELCOME',
+      userId: newUser.id,
+    }).catch((e) => console.error('Failed sending welcome email:', e));
+
     const token = jwt.sign({ id: newUser.id, email: newUser.email, role: newUser.role }, JWT_SECRET, { expiresIn: '7d' });
 
     return res.status(201).json({
@@ -186,8 +195,8 @@ router.post('/forgot-password', async (req, res) => {
     const cleanEmail = email.toLowerCase().trim();
     let user = await prisma.user.findUnique({ where: { email: cleanEmail } });
 
-    // Generate a 4-digit OTP
-    const otpCode = '1234'; // Fixed dev OTP code for easy testing (or Math.floor(1000 + Math.random() * 9000).toString())
+    // Generate dynamic 6-digit OTP code
+    const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
     const otpExpiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 mins
 
     if (user) {
@@ -195,15 +204,23 @@ router.post('/forgot-password', async (req, res) => {
         where: { id: user.id },
         data: { otpCode, otpExpiresAt }
       });
+
+      await sendEmail({
+        to: user.email,
+        subject: 'Password Reset Verification Code',
+        html: `Your password reset confirmation code is: <strong>${otpCode}</strong>`,
+        emailType: 'PASSWORD_RESET',
+        userId: user.id,
+      });
     }
 
     return res.json({
       success: true,
-      message: 'OTP code sent to your email address (Use 1234 for testing)',
+      message: 'Verification code sent to your email address.',
     });
   } catch (error) {
     console.error('Forgot password error:', error);
-    return res.status(500).json({ success: false, message: 'Server error sending OTP' });
+    return res.status(500).json({ success: false, message: 'Server error sending verification code' });
   }
 });
 
@@ -212,28 +229,31 @@ router.post('/verify-otp', async (req, res) => {
   try {
     const { email, otp } = req.body;
     if (!email || !otp) {
-      return res.status(400).json({ success: false, message: 'Email and OTP code are required' });
+      return res.status(400).json({ success: false, message: 'Email and verification code are required' });
     }
 
     const cleanEmail = email.toLowerCase().trim();
     const user = await prisma.user.findUnique({ where: { email: cleanEmail } });
 
     if (!user) {
-      return res.status(404).json({ success: false, message: 'User not found' });
+      return res.status(404).json({ success: false, message: 'User with this email was not found' });
     }
 
-    // Allow 1234 or matching stored OTP
-    if (otp !== '1234' && user.otpCode !== otp) {
-      return res.status(400).json({ success: false, message: 'Invalid or expired OTP code' });
+    if (!user.otpCode || user.otpCode !== otp.toString().trim()) {
+      return res.status(400).json({ success: false, message: 'Invalid or incorrect verification code' });
+    }
+
+    if (user.otpExpiresAt && new Date() > new Date(user.otpExpiresAt)) {
+      return res.status(400).json({ success: false, message: 'Verification code has expired. Please request a new code.' });
     }
 
     return res.json({
       success: true,
-      message: 'OTP verified successfully',
+      message: 'Verification code confirmed successfully',
     });
   } catch (error) {
     console.error('Verify OTP error:', error);
-    return res.status(500).json({ success: false, message: 'Server error verifying OTP' });
+    return res.status(500).json({ success: false, message: 'Server error verifying code' });
   }
 });
 
