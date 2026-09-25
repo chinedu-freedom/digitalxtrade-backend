@@ -21,6 +21,12 @@ model User {
   otpCode          String?
   otpExpiresAt     DateTime?
   balance          Float       @default(0)
+
+  bitcoinAddress   String?     @default("")
+  usdtTrc20Address String?     @default("")
+  usdtBep20Address String?     @default("")
+  litecoinAddress  String?     @default("")
+
   createdAt        DateTime    @default(now())
   updatedAt        DateTime    @updatedAt
 

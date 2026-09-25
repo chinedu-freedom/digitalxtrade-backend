@@ -19,6 +19,10 @@ const formatUser = (user) => ({
   secretQuestion: user.secretQuestion,
   referralCode: user.referralCode,
   isEmailVerified: user.isEmailVerified,
+  bitcoinAddress: user.bitcoinAddress || '',
+  usdtTrc20Address: user.usdtTrc20Address || '',
+  usdtBep20Address: user.usdtBep20Address || '',
+  litecoinAddress: user.litecoinAddress || '',
   createdAt: user.createdAt,
 });
 
@@ -434,8 +438,87 @@ router.post('/admin/users/send-notification', async (req, res) => {
       }
     })().catch((err) => console.error('Batch notification error:', err));
   } catch (error) {
-    return res.status(500).json({ success: false, message: 'Failed to initiate batch notification', error: error.message });
+// POST /api/auth/profile & /api/user/profile
+const handleUpdateProfile = async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization;
+    let userId = req.body.userId || req.body.id;
+    if (!userId && authHeader && authHeader.startsWith('Bearer ')) {
+      try {
+        const token = authHeader.split(' ')[1];
+        const decoded = jwt.verify(token, JWT_SECRET);
+        userId = decoded.id;
+      } catch (e) {}
+    }
+
+    const {
+      email,
+      fullName,
+      full_name,
+      newPassword,
+      password,
+      bitcoinAddress,
+      bitcoin_account_id,
+      usdtTrc20Address,
+      usdt_trc20_account_id,
+      usdtBep20Address,
+      usdt_bep20_account_id,
+      litecoinAddress,
+      litecoin_account_id,
+    } = req.body;
+
+    if (!userId && email) {
+      const dbUser = await prisma.user.findFirst({
+        where: { email: { equals: email, mode: 'insensitive' } }
+      });
+      if (dbUser) userId = dbUser.id;
+    }
+
+    if (!userId) {
+      return res.status(400).json({ success: false, message: 'User identification required' });
+    }
+
+    const dataToUpdate = {};
+
+    const nameToUse = fullName !== undefined ? fullName : full_name;
+    if (nameToUse !== undefined && nameToUse !== null) {
+      dataToUpdate.fullName = nameToUse;
+    }
+
+    const btc = bitcoinAddress !== undefined ? bitcoinAddress : bitcoin_account_id;
+    if (btc !== undefined) dataToUpdate.bitcoinAddress = btc;
+
+    const trc = usdtTrc20Address !== undefined ? usdtTrc20Address : usdt_trc20_account_id;
+    if (trc !== undefined) dataToUpdate.usdtTrc20Address = trc;
+
+    const bep = usdtBep20Address !== undefined ? usdtBep20Address : usdt_bep20_account_id;
+    if (bep !== undefined) dataToUpdate.usdtBep20Address = bep;
+
+    const ltc = litecoinAddress !== undefined ? litecoinAddress : litecoin_account_id;
+    if (ltc !== undefined) dataToUpdate.litecoinAddress = ltc;
+
+    const passToUse = newPassword || password;
+    if (passToUse && passToUse.trim().length > 0) {
+      dataToUpdate.password = await bcrypt.hash(passToUse.trim(), 10);
+    }
+
+    const updatedUser = await prisma.user.update({
+      where: { id: userId },
+      data: dataToUpdate,
+    });
+
+    return res.json({
+      success: true,
+      message: 'Personal information updated successfully',
+      user: formatUser(updatedUser),
+    });
+  } catch (error) {
+    console.error('Update profile error:', error);
+    return res.status(500).json({ success: false, message: 'Failed to update personal information', error: error.message });
   }
-});
+};
+
+router.post('/profile', handleUpdateProfile);
+router.post('/user/profile', handleUpdateProfile);
 
 export default router;
