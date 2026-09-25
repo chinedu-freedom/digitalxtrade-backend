@@ -409,6 +409,42 @@ app.post('/api/deposit/confirm', (req, res) => {
   });
 });
 
+// GET user transactions endpoint
+app.get('/api/transactions', (req, res) => {
+  const allTx = [];
+
+  withdrawalData.transactions.forEach(w => {
+    allTx.push({
+      id: w.id,
+      type: 'WITHDRAWAL',
+      description: `Withdrawal request to ${w.destination || 'crypto wallet'}`,
+      amount: w.amount,
+      gateway: w.currency,
+      status: w.status,
+      created_at: w.createdAt
+    });
+  });
+
+  userDepositsList.forEach(d => {
+    allTx.push({
+      id: d.id,
+      type: 'DEPOSIT',
+      description: `Deposit via ${d.processorName || 'Crypto'} (${d.planName})`,
+      amount: d.amount,
+      gateway: d.processorName,
+      status: d.status,
+      created_at: d.createdAt
+    });
+  });
+
+  allTx.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+  res.json({
+    success: true,
+    transactions: allTx
+  });
+});
+
 app.listen(PORT, () => {
   console.log(`[digital-backend] Server running on http://localhost:${PORT}`);
 });
