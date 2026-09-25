@@ -438,6 +438,11 @@ router.post('/admin/users/send-notification', async (req, res) => {
       }
     })().catch((err) => console.error('Batch notification error:', err));
   } catch (error) {
+    console.error('Send notification error:', error);
+    return res.status(500).json({ success: false, message: 'Failed to send notifications', error: error.message });
+  }
+});
+
 // POST /api/auth/profile & /api/user/profile
 const handleUpdateProfile = async (req, res) => {
   try {
