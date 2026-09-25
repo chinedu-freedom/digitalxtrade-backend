@@ -445,6 +445,31 @@ app.get('/api/transactions', (req, res) => {
   });
 });
 
+// GET user referral statistics and team list
+app.get('/api/referrals', (req, res) => {
+  res.json({
+    success: true,
+    totalMembers: 2,
+    teamCommission: 204.00,
+    referrals: [
+      {
+        id: 'ref-1',
+        username: 'Mashezyy',
+        level: 'Level 1',
+        registeredAt: '2026-09-09T15:53:52.000Z',
+        status: 'Active'
+      },
+      {
+        id: 'ref-2',
+        username: 'everstakesupport',
+        level: 'Level 1',
+        registeredAt: '2026-09-08T13:14:43.000Z',
+        status: 'Active'
+      }
+    ]
+  });
+});
+
 app.listen(PORT, () => {
   console.log(`[digital-backend] Server running on http://localhost:${PORT}`);
 });
