@@ -1,476 +1,1271 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import crypto from 'crypto';
+import jwt from 'jsonwebtoken';
+import prisma from './lib/prisma.js';
 import authRoutes from './routes/authRoutes.js';
+import adminRoutes from './routes/adminRoutes.js';
+import { initCron, runProfitPayouts } from './services/cronService.js';
+import {
+  securitySettings,
+  depositPlans,
+  companyDepositWallets
+} from './lib/store.js';
 
 dotenv.config();
 
 const app = express();
+app.set('trust proxy', true);
 const PORT = process.env.PORT || 3001;
+const JWT_SECRET = process.env.JWT_SECRET || 'digital-project-secret-key-2026';
 
 app.use(cors());
 app.use(express.json());
 
-// API Auth and Admin Routes
+// API Auth and Admin Routes (DigitalXTrade Database Synced)
 app.use('/api/auth', authRoutes);
 app.use('/api', authRoutes);
+app.use('/api', adminRoutes);
 
 // Health Check Endpoint
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', message: 'Digital Backend API Server Running', timestamp: new Date() });
 });
 
-// Security Settings State (persisted with fallback default)
-let securitySettings = {
-  ipSensitivity: 'disabled', // 'disabled' | 'medium' | 'high' | 'paranoic'
-  browserChange: 'disabled', // 'disabled' | 'enabled'
-  twoFactorEnabled: false,
-  secretCode: 'JRZE4OI7K5GLALIG',
-  otpAuthUrl: 'otpauth://totp/DigitalXTrade:user?secret=JRZE4OI7K5GLALIG&issuer=DigitalXTrade',
-  updatedAt: new Date().toISOString()
+// Helper to extract authenticated user from request
+const getAuthUser = async (req) => {
+  const authHeader = req.headers.authorization;
+  let userId = req.headers['x-user-id'] || req.query.userId;
+
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    try {
+      const token = authHeader.split(' ')[1];
+      const decoded = jwt.verify(token, JWT_SECRET);
+      if (decoded && decoded.id) {
+        userId = decoded.id;
+      }
+    } catch (e) {}
+  }
+
+  if (userId) {
+    try {
+      const user = await prisma.user.findUnique({
+        where: { id: userId },
+        include: {
+          deposits: { orderBy: { createdAt: 'desc' } },
+          withdrawals: { orderBy: { createdAt: 'desc' } },
+          transactions: { orderBy: { createdAt: 'desc' } }
+        }
+      });
+      return user;
+    } catch (err) {
+      console.warn('Database user fetch error:', err.message);
+    }
+  }
+
+  // Fallback to first USER in database if development testing without token
+  try {
+    const firstUser = await prisma.user.findFirst({
+      where: { role: 'USER' },
+      include: {
+        deposits: { orderBy: { createdAt: 'desc' } },
+        withdrawals: { orderBy: { createdAt: 'desc' } },
+        transactions: { orderBy: { createdAt: 'desc' } }
+      }
+    });
+    return firstUser;
+  } catch (err) {
+    return null;
+  }
+};
+
+// Helper to get or initialize security settings from database
+const getOrCreateSecuritySettings = async () => {
+  try {
+    let settings = await prisma.securitySetting.findFirst();
+    if (!settings) {
+      settings = await prisma.securitySetting.create({
+        data: {
+          ipSensitivity: 'disabled',
+          browserChange: 'disabled',
+          twoFactorEnabled: false,
+          secretCode: 'JRZE4OI7K5GLALIG',
+          otpAuthUrl: 'otpauth://totp/DigitalXTrade:user?secret=JRZE4OI7K5GLALIG&issuer=DigitalXTrade'
+        }
+      });
+    }
+    return settings;
+  } catch (err) {
+    console.error('Error fetching database security settings, falling back to memory:', err);
+    return securitySettings;
+  }
 };
 
 // GET current security settings
-app.get('/api/security', (req, res) => {
-  res.json({
-    success: true,
-    settings: securitySettings
-  });
+app.get('/api/security', async (req, res) => {
+  try {
+    const settings = await getOrCreateSecuritySettings();
+    return res.json({
+      success: true,
+      settings
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: 'Failed to fetch security settings' });
+  }
 });
 
 // POST update security settings (IP Sensitivity and Browser Change)
-app.post('/api/security/settings', (req, res) => {
-  const { ipSensitivity, browserChange } = req.body;
-  
-  if (ipSensitivity && ['disabled', 'medium', 'high', 'paranoic'].includes(ipSensitivity.toLowerCase())) {
-    securitySettings.ipSensitivity = ipSensitivity.toLowerCase();
+app.post('/api/security/settings', async (req, res) => {
+  try {
+    const { ipSensitivity, browserChange } = req.body;
+    let settings = await getOrCreateSecuritySettings();
+
+    const dataToUpdate = {};
+    if (ipSensitivity && ['disabled', 'medium', 'high', 'paranoic'].includes(ipSensitivity.toLowerCase())) {
+      dataToUpdate.ipSensitivity = ipSensitivity.toLowerCase();
+      securitySettings.ipSensitivity = dataToUpdate.ipSensitivity;
+    }
+
+    if (browserChange && ['disabled', 'enabled'].includes(browserChange.toLowerCase())) {
+      dataToUpdate.browserChange = browserChange.toLowerCase();
+      securitySettings.browserChange = dataToUpdate.browserChange;
+    }
+
+    if (settings && settings.id) {
+      settings = await prisma.securitySetting.update({
+        where: { id: settings.id },
+        data: dataToUpdate
+      });
+    }
+
+    return res.json({
+      success: true,
+      message: 'Security settings updated successfully in database',
+      settings
+    });
+  } catch (err) {
+    console.error('Failed to update security settings:', err);
+    return res.status(500).json({ success: false, message: 'Failed to update security settings' });
   }
-
-  if (browserChange && ['disabled', 'enabled'].includes(browserChange.toLowerCase())) {
-    securitySettings.browserChange = browserChange.toLowerCase();
-  }
-
-  securitySettings.updatedAt = new Date().toISOString();
-
-  res.json({
-    success: true,
-    message: 'Security settings updated successfully',
-    settings: securitySettings
-  });
 });
 
 // POST enable 2FA
-app.post('/api/security/2fa/enable', (req, res) => {
-  const { token, secretCode } = req.body;
+app.post('/api/security/2fa/enable', async (req, res) => {
+  try {
+    const code = req.body.token || req.body.code;
+    const secret = req.body.secretCode || req.body.secret;
 
-  if (!token || !/^\d{6}$/.test(token.toString().trim())) {
-    return res.status(400).json({
-      success: false,
-      message: 'Invalid two-factor authentication token. Please enter a valid 6-digit code.'
+    if (!code || String(code).trim().length !== 6) {
+      return res.status(400).json({ success: false, message: 'Please enter a valid 6-digit verification code.' });
+    }
+
+    let settings = await getOrCreateSecuritySettings();
+
+    const dataToUpdate = {
+      twoFactorEnabled: true
+    };
+    if (secret) {
+      dataToUpdate.secretCode = secret;
+      dataToUpdate.otpAuthUrl = `otpauth://totp/DigitalXTrade:user?secret=${secret}&issuer=DigitalXTrade`;
+    }
+
+    if (settings && settings.id) {
+      settings = await prisma.securitySetting.update({
+        where: { id: settings.id },
+        data: dataToUpdate
+      });
+    }
+    securitySettings.twoFactorEnabled = true;
+
+    return res.json({
+      success: true,
+      message: 'Two-Factor Authentication enabled successfully!',
+      settings
     });
+  } catch (err) {
+    console.error('Failed to enable 2FA:', err);
+    return res.status(500).json({ success: false, message: 'Failed to enable Two-Factor Authentication' });
   }
-
-  securitySettings.twoFactorEnabled = true;
-  if (secretCode) {
-    securitySettings.secretCode = secretCode;
-  }
-  securitySettings.updatedAt = new Date().toISOString();
-
-  res.json({
-    success: true,
-    message: 'Two-Factor Authentication enabled successfully',
-    settings: securitySettings
-  });
 });
 
 // POST disable 2FA
-app.post('/api/security/2fa/disable', (req, res) => {
-  const { token } = req.body;
+app.post('/api/security/2fa/disable', async (req, res) => {
+  try {
+    let settings = await getOrCreateSecuritySettings();
 
-  if (!token || !/^\d{6}$/.test(token.toString().trim())) {
-    return res.status(400).json({
-      success: false,
-      message: 'Invalid token. Please enter your 6-digit authentication code to disable 2FA.'
+    if (settings && settings.id) {
+      settings = await prisma.securitySetting.update({
+        where: { id: settings.id },
+        data: { twoFactorEnabled: false }
+      });
+    }
+    securitySettings.twoFactorEnabled = false;
+
+    return res.json({
+      success: true,
+      message: 'Two-Factor Authentication has been disabled',
+      settings
     });
+  } catch (err) {
+    console.error('Failed to disable 2FA:', err);
+    return res.status(500).json({ success: false, message: 'Failed to disable Two-Factor Authentication' });
   }
-
-  securitySettings.twoFactorEnabled = false;
-  securitySettings.updatedAt = new Date().toISOString();
-
-  res.json({
-    success: true,
-    message: 'Two-Factor Authentication has been disabled',
-    settings: securitySettings
-  });
 });
 
-// Withdrawal State and Wallets
-let withdrawalData = {
-  accountBalance: 0.00,
-  pendingWithdrawals: 0.00,
-  currencies: [
-    {
-      id: 'bitcoin',
-      symbol: 'BTC',
-      name: 'BITCOIN',
-      available: 0.00,
-      pending: 0.00,
-      accountId: '88888888',
-      minWithdrawal: 20.00,
-      fee: 0.00
-    },
-    {
-      id: 'usdt_trc20',
-      symbol: 'USDT-TRC20',
-      name: 'USDT(TRC20)',
-      available: 0.00,
-      pending: 0.00,
-      accountId: '88888888',
-      minWithdrawal: 10.00,
-      fee: 0.00
-    },
-    {
-      id: 'usdt_bep20',
-      symbol: 'USDT-BEP20',
-      name: 'USDT(BEP20)',
-      available: 0.00,
-      pending: 0.00,
-      accountId: 'Bbsjeie',
-      minWithdrawal: 10.00,
-      fee: 0.00
-    },
-    {
-      id: 'litecoin',
-      symbol: 'LTC',
-      name: 'LITECOIN',
-      available: 0.00,
-      pending: 0.00,
-      accountId: 'Jsjwkwkw',
-      minWithdrawal: 15.00,
-      fee: 0.00
-    }
-  ],
-  transactions: []
-};
 
 // GET withdrawal information
-app.get('/api/withdraw', (req, res) => {
-  res.json({
-    success: true,
-    data: withdrawalData
-  });
+app.get('/api/withdraw', async (req, res) => {
+  try {
+    const user = await getAuthUser(req);
+    const totalUserBal = user ? parseFloat(user.balance || 0) : 0.00;
+
+    let btcBal = user ? parseFloat(user.btcBalance || 0) : 0.00;
+    let trcBal = user ? parseFloat(user.usdtTrc20Balance || 0) : 0.00;
+    let bepBal = user ? parseFloat(user.usdtBep20Balance || 0) : 0.00;
+    let ltcBal = user ? parseFloat(user.ltcBalance || 0) : 0.00;
+
+    // Fallback if legacy account credited funds to main balance directly
+    if (btcBal + trcBal + bepBal + ltcBal === 0 && totalUserBal > 0) {
+      trcBal = totalUserBal;
+    }
+
+    const getPendingForCurrency = (currencyMatchList) => {
+      if (!user || !user.withdrawals) return 0.00;
+      return user.withdrawals
+        .filter(w => w.status === 'PENDING' && currencyMatchList.includes((w.currency || '').toUpperCase()))
+        .reduce((acc, w) => acc + parseFloat(w.amount || 0), 0);
+    };
+
+    const totalPendingSum = user && user.withdrawals
+      ? user.withdrawals
+          .filter(w => w.status === 'PENDING')
+          .reduce((acc, w) => acc + parseFloat(w.amount || 0), 0)
+      : 0.00;
+
+    const btcPending = getPendingForCurrency(['BTC', 'BITCOIN']);
+    const trcPending = getPendingForCurrency(['USDT', 'USDT-TRC20', 'USDT (TRC20)', 'TRC20']);
+    const bepPending = getPendingForCurrency(['USDT-BEP20', 'USDT (BEP20)', 'BEP20']);
+    const ltcPending = getPendingForCurrency(['LTC', 'LITECOIN']);
+
+    const currencies = [
+      {
+        id: 'bitcoin',
+        symbol: 'BTC',
+        name: 'BITCOIN',
+        available: btcBal,
+        pending: btcPending,
+        accountId: user?.bitcoinAddress || '',
+        minWithdrawal: 20.00,
+        fee: 0.00
+      },
+      {
+        id: 'usdt_trc20',
+        symbol: 'USDT-TRC20',
+        name: 'USDT(TRC20)',
+        available: trcBal,
+        pending: trcPending,
+        accountId: user?.usdtTrc20Address || '',
+        minWithdrawal: 10.00,
+        fee: 0.00
+      },
+      {
+        id: 'usdt_bep20',
+        symbol: 'USDT-BEP20',
+        name: 'USDT(BEP20)',
+        available: bepBal,
+        pending: bepPending,
+        accountId: user?.usdtBep20Address || '',
+        minWithdrawal: 10.00,
+        fee: 0.00
+      },
+      {
+        id: 'litecoin',
+        symbol: 'LTC',
+        name: 'LITECOIN',
+        available: ltcBal,
+        pending: ltcPending,
+        accountId: user?.litecoinAddress || '',
+        minWithdrawal: 15.00,
+        fee: 0.00
+      }
+    ];
+
+    return res.json({
+      success: true,
+      data: {
+        accountBalance: totalUserBal,
+        pendingWithdrawals: totalPendingSum,
+        currencies,
+        transactions: user ? user.withdrawals : []
+      }
+    });
+  } catch (err) {
+    console.error('Get withdrawal error:', err);
+    return res.status(500).json({ success: false, message: 'Failed to fetch withdrawal info' });
+  }
+});
+
+// POST cancel/release active investment (50% principal refund)
+app.post(['/api/user/deposits/:id/cancel', '/api/investments/:id/cancel', '/api/deposit/:id/cancel'], async (req, res) => {
+  try {
+    const user = await getAuthUser(req);
+    if (!user) {
+      return res.status(401).json({ success: false, message: 'Please log in to cancel an investment.' });
+    }
+
+    const { id } = req.params;
+    const deposit = await prisma.deposit.findUnique({
+      where: { id }
+    });
+
+    if (!deposit) {
+      return res.status(404).json({ success: false, message: 'Deposit or investment not found.' });
+    }
+
+    if (deposit.userId !== user.id && user.role !== 'ADMIN') {
+      return res.status(403).json({ success: false, message: 'Unauthorized to cancel this deposit.' });
+    }
+
+    const statusUpper = (deposit.status || '').toUpperCase();
+    if (statusUpper === 'CANCELLED' || statusUpper === 'RELEASED') {
+      return res.status(400).json({ success: false, message: 'This investment has already been cancelled.' });
+    }
+
+    const origAmount = parseFloat(deposit.amount || 0);
+    if (origAmount <= 0) {
+      return res.status(400).json({ success: false, message: 'Invalid deposit amount for cancellation.' });
+    }
+
+    // Calculate 50% refund
+    const refundAmount = origAmount * 0.50;
+
+    // Determine user's target wallet balance field based on currency
+    const curr = (deposit.currency || '').toUpperCase();
+    let walletField = 'usdtTrc20Balance';
+    if (curr.includes('BTC') || curr.includes('BITCOIN')) walletField = 'btcBalance';
+    else if (curr.includes('BEP20')) walletField = 'usdtBep20Balance';
+    else if (curr.includes('LTC') || curr.includes('LITECOIN')) walletField = 'ltcBalance';
+
+    // Update User balances: +50% refund to main balance & crypto balance, -100% from staked balance
+    const currentStaked = parseFloat(user.stakedBalance || 0);
+    const stakeDecrement = Math.min(origAmount, currentStaked);
+
+    await prisma.user.update({
+      where: { id: deposit.userId },
+      data: {
+        balance: { increment: refundAmount },
+        [walletField]: { increment: refundAmount },
+        stakedBalance: { decrement: stakeDecrement }
+      }
+    });
+
+    // Update Deposit status
+    const updatedDeposit = await prisma.deposit.update({
+      where: { id: deposit.id },
+      data: { status: 'CANCELLED' }
+    });
+
+    // Create Transaction record for the refund
+    await prisma.transaction.create({
+      data: {
+        userId: deposit.userId,
+        type: 'STAKE_CANCEL',
+        amount: refundAmount,
+        description: `Early investment cancellation of ${origAmount.toFixed(2)} (50% principal refund of ${refundAmount.toFixed(2)} returned to balance)`,
+        status: 'APPROVED'
+      }
+    });
+
+    return res.json({
+      success: true,
+      message: `Investment cancelled successfully! 50% principal refund of ${refundAmount.toFixed(2)} has been returned to your account.`,
+      refundAmount,
+      deposit: updatedDeposit
+    });
+  } catch (err) {
+    console.error('Cancel investment error:', err);
+    return res.status(500).json({ success: false, message: 'Failed to cancel investment.' });
+  }
 });
 
 // POST submit a withdrawal request
-app.post('/api/withdraw', (req, res) => {
-  const { currencyId, amount } = req.body;
-  const numAmount = parseFloat(amount);
+app.post('/api/withdraw', async (req, res) => {
+  try {
+    const { currencyId, amount, address } = req.body;
+    const numAmount = parseFloat(amount);
+    const user = await getAuthUser(req);
 
-  const currency = withdrawalData.currencies.find(c => c.id === currencyId);
-  if (!currency) {
-    return res.status(400).json({
-      success: false,
-      message: 'Invalid currency selected for withdrawal.'
+    if (!user) {
+      return res.status(401).json({ success: false, message: 'Please login to submit a withdrawal.' });
+    }
+
+    if (isNaN(numAmount) || numAmount <= 0) {
+      return res.status(400).json({ success: false, message: 'Please enter a valid withdrawal amount.' });
+    }
+
+    let targetWalletField = 'usdtTrc20Balance';
+    if (currencyId === 'bitcoin') targetWalletField = 'btcBalance';
+    else if (currencyId === 'usdt_bep20') targetWalletField = 'usdtBep20Balance';
+    else if (currencyId === 'litecoin') targetWalletField = 'ltcBalance';
+
+    let availableWalletBal = parseFloat(user[targetWalletField] || 0);
+    const totalUserBal = parseFloat(user.balance || 0);
+
+    // Fallback if legacy user balance was credited to main balance directly
+    if (user.btcBalance === 0 && user.usdtTrc20Balance === 0 && user.usdtBep20Balance === 0 && user.ltcBalance === 0 && totalUserBal > 0) {
+      availableWalletBal = totalUserBal;
+    }
+
+    if (numAmount > availableWalletBal) {
+      return res.status(400).json({
+        success: false,
+        message: `Insufficient balance in ${currencyId.toUpperCase()}. Available: ${availableWalletBal.toFixed(2)}`
+      });
+    }
+
+    const minWithdrawal = currencyId === 'bitcoin' ? 20.00 : currencyId === 'litecoin' ? 15.00 : 10.00;
+    if (numAmount < minWithdrawal) {
+      return res.status(400).json({
+        success: false,
+        message: `Minimum withdrawal is $${minWithdrawal.toFixed(2)}.`
+      });
+    }
+
+    // Determine target wallet address
+    let targetAddress = address;
+    if (!targetAddress) {
+      if (currencyId === 'bitcoin') targetAddress = user.bitcoinAddress;
+      else if (currencyId === 'usdt_trc20') targetAddress = user.usdtTrc20Address;
+      else if (currencyId === 'usdt_bep20') targetAddress = user.usdtBep20Address;
+      else if (currencyId === 'litecoin') targetAddress = user.litecoinAddress;
+    }
+
+    if (!targetAddress) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please set or enter your withdrawal address first.'
+      });
+    }
+
+    // Deduct user balance in PostgreSQL
+    const dataToDecrement = { balance: { decrement: numAmount } };
+    if (currencyId === 'bitcoin') dataToDecrement.btcBalance = { decrement: numAmount };
+    else if (currencyId === 'usdt_trc20') dataToDecrement.usdtTrc20Balance = { decrement: numAmount };
+    else if (currencyId === 'usdt_bep20') dataToDecrement.usdtBep20Balance = { decrement: numAmount };
+    else if (currencyId === 'litecoin') dataToDecrement.ltcBalance = { decrement: numAmount };
+
+    const updatedUser = await prisma.user.update({
+      where: { id: user.id },
+      data: dataToDecrement
     });
-  }
 
-  if (isNaN(numAmount) || numAmount <= 0) {
-    return res.status(400).json({
-      success: false,
-      message: 'Please enter a valid withdrawal amount.'
+    const currencyName = currencyId === 'bitcoin' ? 'BTC' : currencyId === 'litecoin' ? 'LTC' : (currencyId === 'usdt_bep20' ? 'USDT-BEP20' : 'USDT-TRC20');
+
+    // Create persistent Withdrawal record
+    const withdrawal = await prisma.withdrawal.create({
+      data: {
+        userId: user.id,
+        amount: numAmount,
+        netAmount: numAmount,
+        charge: 0,
+        currency: currencyName,
+        walletAddress: targetAddress,
+        status: 'PENDING'
+      }
     });
-  }
 
-  if (numAmount > currency.available) {
-    return res.status(400).json({
-      success: false,
-      message: `You have insufficient ${currency.name} balance. Available: $${currency.available.toFixed(2)}`
+    // Create persistent Transaction record
+    await prisma.transaction.create({
+      data: {
+        userId: user.id,
+        type: 'WITHDRAWAL',
+        amount: numAmount,
+        description: `Withdrawal request of $${numAmount.toFixed(2)} to ${targetAddress} (${currencyName})`,
+        status: 'PENDING'
+      }
     });
-  }
 
-  if (numAmount < currency.minWithdrawal) {
-    return res.status(400).json({
-      success: false,
-      message: `Minimum withdrawal for ${currency.name} is $${currency.minWithdrawal.toFixed(2)}.`
+    return res.json({
+      success: true,
+      message: `Withdrawal request for $${numAmount.toFixed(2)} submitted successfully!`,
+      withdrawal,
+      newBalance: updatedUser.balance
     });
+  } catch (err) {
+    console.error('Submit withdrawal error:', err);
+    return res.status(500).json({ success: false, message: 'Failed to process withdrawal request' });
   }
-
-  // Deduct available, add to pending
-  currency.available -= numAmount;
-  currency.pending += numAmount;
-  withdrawalData.accountBalance = withdrawalData.currencies.reduce((s, c) => s + c.available, 0);
-  withdrawalData.pendingWithdrawals = withdrawalData.currencies.reduce((s, c) => s + c.pending, 0);
-
-  const tx = {
-    id: `WD-${Date.now()}`,
-    currency: currency.name,
-    amount: numAmount,
-    destination: currency.accountId,
-    status: 'Pending',
-    createdAt: new Date().toISOString()
-  };
-  withdrawalData.transactions.unshift(tx);
-
-  res.json({
-    success: true,
-    message: `Withdrawal request for $${numAmount.toFixed(2)} ${currency.name} submitted successfully!`,
-    data: withdrawalData,
-    transaction: tx
-  });
 });
 
 // POST update withdrawal account address
-app.post('/api/withdraw/account', (req, res) => {
-  const { currencyId, accountId } = req.body;
-  const currency = withdrawalData.currencies.find(c => c.id === currencyId);
-  if (!currency) {
-    return res.status(400).json({ success: false, message: 'Currency not found.' });
-  }
+app.post('/api/withdraw/account', async (req, res) => {
+  try {
+    const { currencyId, accountId } = req.body;
+    const user = await getAuthUser(req);
+    if (!user) {
+      return res.status(401).json({ success: false, message: 'Authentication required' });
+    }
 
-  currency.accountId = accountId || '';
-  res.json({
-    success: true,
-    message: `Account address updated for ${currency.name}`,
-    data: withdrawalData
-  });
+    let updateField = {};
+    if (currencyId === 'bitcoin' || currencyId === 'BTC') updateField.bitcoinAddress = accountId;
+    else if (currencyId === 'usdt_trc20' || currencyId === 'USDT-TRC20') updateField.usdtTrc20Address = accountId;
+    else if (currencyId === 'usdt_bep20' || currencyId === 'USDT-BEP20') updateField.usdtBep20Address = accountId;
+    else if (currencyId === 'litecoin' || currencyId === 'LTC') updateField.litecoinAddress = accountId;
+
+    const updatedUser = await prisma.user.update({
+      where: { id: user.id },
+      data: updateField
+    });
+
+    return res.json({
+      success: true,
+      message: 'Account address updated successfully',
+      user: updatedUser
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: 'Failed to update address' });
+  }
 });
 
-// Deposit Plans and Deposit Management State
-const depositPlans = [
-  {
-    id: 'foundation',
-    name: 'FOUNDATION PLAN',
-    planLabel: 'Plan 1',
-    minAmount: 40.00,
-    maxAmount: 4999.00,
-    dailyProfit: 2.80,
-    profitType: 'Daily Profit (%)',
-    durationDays: 30,
-    isPromo: false
-  },
-  {
-    id: 'acceleration',
-    name: 'ACCELERATION PLAN',
-    planLabel: 'Plan 2',
-    minAmount: 5000.00,
-    maxAmount: 9999.00,
-    dailyProfit: 5.50,
-    profitType: 'Daily Profit (%)',
-    durationDays: 30,
-    isPromo: false
-  },
-  {
-    id: 'stability',
-    name: 'STABILITY PLAN',
-    planLabel: 'Plan 3',
-    minAmount: 10000.00,
-    maxAmount: 19999.00,
-    dailyProfit: 8.50,
-    profitType: 'Daily Profit (%)',
-    durationDays: 30,
-    isPromo: false
-  },
-  {
-    id: 'wealth',
-    name: 'WEALTH PLAN',
-    planLabel: 'Plan 4',
-    minAmount: 20000.00,
-    maxAmount: null,
-    dailyProfit: 10.50,
-    profitType: 'Daily Profit (%)',
-    durationDays: 30,
-    isPromo: false
-  },
-  {
-    id: 'promo1',
-    name: 'DIGITALXTRADE MAX PLAN(250% In 48 hours)',
-    planLabel: 'PROMO PLAN1',
-    minAmount: 1000.00,
-    maxAmount: 4999.00,
-    dailyProfit: 300.00,
-    profitType: 'Profit (%)',
-    durationHours: 48,
-    isPromo: true
-  },
-  {
-    id: 'promo2',
-    name: 'DIGITALXTRADE SUPER PLAN(500% In 72 hours)',
-    planLabel: 'PROMO PLAN 2',
-    minAmount: 5000.00,
-    maxAmount: 100000.00,
-    dailyProfit: 500.00,
-    profitType: 'Profit (%)',
-    durationHours: 72,
-    isPromo: true
-  }
-];
-
-const companyDepositWallets = {
-  bitcoin: {
-    name: 'BITCOIN',
-    address: 'bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq',
-    network: 'Bitcoin Mainnet'
-  },
-  usdt_trc20: {
-    name: 'USDT(TRC20)',
-    address: 'TYDzsYUEpvnYmQk4zGP9sWWcTEd3GL6X7b',
-    network: 'Tron (TRC-20)'
-  },
-  usdt_bep20: {
-    name: 'USDT(BEP20)',
-    address: '0x71C83605273C1964f4fB34b07D14187f58b0D892',
-    network: 'BNB Smart Chain (BEP-20)'
-  },
-  litecoin: {
-    name: 'LITECOIN',
-    address: 'ltc1qg62u6e45p20a6e026y24s9gsv9e49v3z27j7ea',
-    network: 'Litecoin Mainnet'
-  }
-};
-
-let userDepositsList = [];
-
 // GET deposit plans and company deposit addresses
-app.get('/api/deposit/plans', (req, res) => {
-  res.json({
-    success: true,
-    plans: depositPlans,
-    wallets: companyDepositWallets,
-    accountBalance: withdrawalData.accountBalance
-  });
+app.get('/api/deposit/plans', async (req, res) => {
+  try {
+    const user = await getAuthUser(req);
+    const userBalance = user ? parseFloat(user.balance || 0) : 0.00;
+
+    let btcBal = user ? parseFloat(user.btcBalance || 0) : 0.00;
+    let trcBal = user ? parseFloat(user.usdtTrc20Balance || 0) : 0.00;
+    let bepBal = user ? parseFloat(user.usdtBep20Balance || 0) : 0.00;
+    let ltcBal = user ? parseFloat(user.ltcBalance || 0) : 0.00;
+
+    if (btcBal + trcBal + bepBal + ltcBal === 0 && userBalance > 0) {
+      trcBal = userBalance;
+    }
+
+    const userBalances = {
+      bitcoin: btcBal,
+      usdt_trc20: trcBal,
+      usdt_bep20: bepBal,
+      litecoin: ltcBal
+    };
+
+    const dbPlans = await prisma.investmentPlan.findMany({
+      where: { status: 'Active' },
+      orderBy: { minAmount: 'asc' }
+    });
+
+    const formattedPlans = dbPlans.map((p) => {
+      const minLabel = `$${Number(p.minAmount).toFixed(2)}`;
+      const maxLabel = p.maxAmount ? `$${Number(p.maxAmount).toFixed(2)}` : '∞';
+      return {
+        id: p.id,
+        name: p.name,
+        title: p.name,
+        planName: p.planLabel || 'Investment Plan',
+        planLabel: p.planLabel || 'Investment Plan',
+        minAmount: Number(p.minAmount),
+        maxAmount: p.maxAmount ? Number(p.maxAmount) : null,
+        depositRange: `${minLabel} - ${maxLabel}`,
+        profitRate: `${Number(p.dailyProfit).toFixed(2)}%`,
+        profitNumber: Number(p.dailyProfit),
+        dailyProfit: Number(p.dailyProfit),
+        profitLabel: p.profitType || 'Daily Profit (%)',
+        durationDays: p.durationDays,
+        durationHours: p.durationHours,
+        duration: p.durationHours ? `${p.durationHours} hours` : (p.durationDays ? `${p.durationDays} Days` : 'Daily'),
+        isPromo: Boolean(p.isPromo),
+        status: p.status,
+        createdAt: p.createdAt
+      };
+    });
+
+    return res.json({
+      success: true,
+      plans: formattedPlans,
+      wallets: companyDepositWallets,
+      accountBalance: userBalance,
+      userBalances
+    });
+  } catch (err) {
+    console.error('Failed to fetch deposit plans from database:', err);
+    return res.status(500).json({ success: false, message: 'Failed to fetch deposit plans' });
+  }
 });
 
 // POST create / spend a deposit order
-app.post('/api/deposit', (req, res) => {
-  const { planId, amount, paymentMethod, processorId } = req.body;
-  const numAmount = parseFloat(amount);
+app.post(['/api/deposit', '/api/deposits'], async (req, res) => {
+  try {
+    const { planId, amount, paymentMethod, processorId, payment_method, mode, depositMode } = req.body;
+    const numAmount = parseFloat(amount);
+    const selectedProcId = processorId || (payment_method ? payment_method.toLowerCase() : 'bitcoin');
+    const selectedPlanId = planId || 'foundation';
 
-  const plan = depositPlans.find(p => p.id === planId);
-  if (!plan) {
-    return res.status(400).json({ success: false, message: 'Invalid plan selected.' });
-  }
+    // Find the real plan from PostgreSQL database
+    let plan = await prisma.investmentPlan.findUnique({
+      where: { id: selectedPlanId }
+    }).catch(() => null);
 
-  if (isNaN(numAmount) || numAmount < plan.minAmount) {
-    return res.status(400).json({
-      success: false,
-      message: `Minimum deposit for ${plan.name} is $${plan.minAmount.toFixed(2)}.`
+    if (!plan) {
+      plan = await prisma.investmentPlan.findFirst({
+        where: {
+          OR: [
+            { name: { contains: selectedPlanId, mode: 'insensitive' } },
+            { planLabel: { contains: selectedPlanId, mode: 'insensitive' } }
+          ]
+        }
+      });
+    }
+
+    if (!plan) {
+      plan = await prisma.investmentPlan.findFirst({ orderBy: { minAmount: 'asc' } });
+    }
+
+    if (isNaN(numAmount) || numAmount <= 0) {
+      return res.status(400).json({ success: false, message: 'Please enter a valid deposit amount.' });
+    }
+
+    if (plan && numAmount < Number(plan.minAmount)) {
+      return res.status(400).json({
+        success: false,
+        message: `Minimum deposit for ${plan.name} is $${Number(plan.minAmount).toFixed(2)}.`
+      });
+    }
+
+    if (plan && plan.maxAmount && numAmount > Number(plan.maxAmount)) {
+      return res.status(400).json({
+        success: false,
+        message: `Maximum deposit for ${plan.name} is $${Number(plan.maxAmount).toFixed(2)}.`
+      });
+    }
+
+    const user = await getAuthUser(req);
+    if (!user) {
+      return res.status(401).json({ success: false, message: 'Please log in to activate an investment deposit.' });
+    }
+
+    const walletInfo = companyDepositWallets[selectedProcId] || companyDepositWallets.bitcoin;
+
+    // Direct spend from account balance
+    if (paymentMethod === 'balance') {
+      let currencyBalanceField = null;
+      let currencyLabel = 'Account';
+      if (selectedProcId === 'bitcoin' || selectedProcId === 'btc') {
+        currencyBalanceField = 'btcBalance';
+        currencyLabel = 'Bitcoin';
+      } else if (selectedProcId === 'usdt_trc20' || selectedProcId === 'usdt-trc20') {
+        currencyBalanceField = 'usdtTrc20Balance';
+        currencyLabel = 'USDT (TRC20)';
+      } else if (selectedProcId === 'usdt_bep20' || selectedProcId === 'usdt-bep20') {
+        currencyBalanceField = 'usdtBep20Balance';
+        currencyLabel = 'USDT (BEP20)';
+      } else if (selectedProcId === 'litecoin' || selectedProcId === 'ltc') {
+        currencyBalanceField = 'ltcBalance';
+        currencyLabel = 'Litecoin';
+      }
+
+      const specificBal = currencyBalanceField ? parseFloat(user[currencyBalanceField] || 0) : parseFloat(user.balance || 0);
+      if (specificBal < numAmount) {
+        return res.status(400).json({
+          success: false,
+          message: `Insufficient ${currencyLabel} balance ($${specificBal.toFixed(2)}). You requested $${numAmount.toFixed(2)}. Please choose the Crypto Topup option or select a currency with sufficient funds.`
+        });
+      }
+
+      // Deduct from specific currency balance & total balance, add to staked balance in PostgreSQL
+      const updateData = {
+        balance: { decrement: numAmount },
+        stakedBalance: { increment: numAmount },
+        totalDeposits: { increment: numAmount }
+      };
+      if (currencyBalanceField) {
+        updateData[currencyBalanceField] = { decrement: numAmount };
+      }
+
+      const updatedUser = await prisma.user.update({
+        where: { id: user.id },
+        data: updateData
+      });
+
+      // Create persistent Deposit record in PostgreSQL
+      const depositOrder = await prisma.deposit.create({
+        data: {
+          userId: user.id,
+          planId: plan.id,
+          planName: plan.name,
+          amount: numAmount,
+          currency: walletInfo.name,
+          paymentMethod: 'balance',
+          walletAddress: 'Account Balance',
+          status: 'APPROVED'
+        }
+      });
+
+      // Create persistent Transaction record
+      await prisma.transaction.create({
+        data: {
+          userId: user.id,
+          type: 'STAKE',
+          amount: numAmount,
+          description: `Plan ${plan.name} activated directly from account balance`,
+          status: 'COMPLETED'
+        }
+      });
+
+      return res.json({
+        success: true,
+        message: `Plan ${plan.name} activated successfully from account balance!`,
+        newBalance: updatedUser.balance,
+        order: depositOrder,
+        deposit: depositOrder
+      });
+    }
+
+    // Direct crypto deposit (Automatic or Manual Gateway)
+    const targetMode = depositMode || mode || 'automatic';
+    const OXAPAY_MERCHANT_KEY = process.env.OXAPAY_MERCHANT_KEY;
+    const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:3001';
+
+    // If Automatic deposit mode and OxaPay Merchant Key is configured, generate dynamic crypto address
+    if (targetMode === 'automatic' && OXAPAY_MERCHANT_KEY) {
+      try {
+        let payCurrency = 'USDT';
+        let oxapayNetwork = 'trc20';
+
+        const procLower = (selectedProcId || '').toLowerCase();
+        if (procLower.includes('bep20') || procLower.includes('bsc')) {
+          payCurrency = 'USDT';
+          oxapayNetwork = 'bep20';
+        } else if (procLower.includes('trc20') || procLower.includes('tron')) {
+          payCurrency = 'USDT';
+          oxapayNetwork = 'trc20';
+        } else if (procLower.includes('btc') || procLower.includes('bitcoin')) {
+          payCurrency = 'BTC';
+          oxapayNetwork = 'btc';
+        } else if (procLower.includes('ltc') || procLower.includes('litecoin')) {
+          payCurrency = 'LTC';
+          oxapayNetwork = 'ltc';
+        } else if (procLower.includes('eth') || procLower.includes('erc20')) {
+          payCurrency = 'ETH';
+          oxapayNetwork = 'erc20';
+        }
+
+        const invoiceRes = await fetch('https://api.oxapay.com/merchants/request/whitelabel', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            merchant: OXAPAY_MERCHANT_KEY,
+            amount: numAmount,
+            payCurrency,
+            network: oxapayNetwork,
+            feePaidByPayer: 0,
+            callbackUrl: `${BACKEND_URL}/api/oxapay-webhook`,
+            description: `DigitalXTrade Deposit - ${walletInfo.name}`
+          })
+        });
+
+        const json = await invoiceRes.json();
+        const returnedAddress = json.payAddress || json.address;
+
+        if (json.result === 100 && returnedAddress) {
+          const depositOrder = await prisma.deposit.create({
+            data: {
+              userId: user.id,
+              planId: plan.id,
+              planName: plan.name,
+              amount: numAmount,
+              currency: walletInfo.name,
+              paymentMethod: 'crypto_automatic',
+              walletAddress: returnedAddress,
+              txHash: String(json.trackId),
+              adminNote: `TrackID: ${json.trackId}`,
+              status: 'PENDING'
+            }
+          });
+
+          await prisma.transaction.create({
+            data: {
+              id: depositOrder.id,
+              userId: user.id,
+              type: 'DEPOSIT',
+              amount: numAmount,
+              description: `Automatic deposit initiated via ${walletInfo.name} for ${plan.name} (TrackID: ${json.trackId})`,
+              status: 'PENDING'
+            }
+          });
+
+          return res.json({
+            success: true,
+            message: 'Automatic payment address generated successfully',
+            dynamic: true,
+            address: returnedAddress,
+            payAddress: returnedAddress,
+            trackId: json.trackId,
+            order: {
+              ...depositOrder,
+              payAddress: returnedAddress,
+              address: returnedAddress,
+              network: walletInfo.network,
+              processorName: walletInfo.name,
+              trackId: json.trackId
+            },
+            deposit: depositOrder
+          });
+        }
+      } catch (oxaErr) {
+        console.error('OXAPAY_INVOICE_ERROR:', oxaErr);
+      }
+    }
+
+    // Manual crypto deposit or fallback static wallet address
+    const depositOrder = await prisma.deposit.create({
+      data: {
+        userId: user.id,
+        planId: plan.id,
+        planName: plan.name,
+        amount: numAmount,
+        currency: walletInfo.name,
+        paymentMethod: 'crypto_manual',
+        walletAddress: walletInfo.address,
+        status: 'PENDING'
+      }
     });
-  }
 
-  if (plan.maxAmount && numAmount > plan.maxAmount) {
-    return res.status(400).json({
-      success: false,
-      message: `Maximum deposit for ${plan.name} is $${plan.maxAmount.toFixed(2)}.`
+    await prisma.transaction.create({
+      data: {
+        id: depositOrder.id,
+        userId: user.id,
+        type: 'DEPOSIT',
+        amount: numAmount,
+        description: `Manual deposit initiated via ${walletInfo.name} for ${plan.name}`,
+        status: 'PENDING'
+      }
     });
+
+    return res.json({
+      success: true,
+      message: 'Deposit invoice generated successfully',
+      dynamic: false,
+      address: walletInfo.address,
+      payAddress: walletInfo.address,
+      order: {
+        ...depositOrder,
+        payAddress: walletInfo.address,
+        address: walletInfo.address,
+        network: walletInfo.network,
+        processorName: walletInfo.name
+      },
+      deposit: depositOrder
+    });
+  } catch (err) {
+    console.error('Create deposit error:', err);
+    return res.status(500).json({ success: false, message: 'Failed to process deposit' });
   }
+});
 
-  const walletInfo = companyDepositWallets[processorId] || companyDepositWallets.bitcoin;
+// OxaPay Automated Webhook Listener
+app.all(['/api/oxapay-webhook', '/oxapay-webhook'], async (req, res) => {
+  try {
+    const payload = req.body || {};
+    const signature = req.headers['x-oxapay-signature'];
+    const OXAPAY_MERCHANT_KEY = process.env.OXAPAY_MERCHANT_KEY;
 
-  const depositOrder = {
-    id: `DEP-${Date.now()}`,
-    planId: plan.id,
-    planName: plan.name,
-    planLabel: plan.planLabel,
-    amount: numAmount,
-    paymentMethod: paymentMethod || 'topup', // 'topup' or 'balance'
-    processorId: processorId || 'bitcoin',
-    processorName: walletInfo.name,
-    payAddress: walletInfo.address,
-    network: walletInfo.network,
-    status: paymentMethod === 'balance' ? 'Active' : 'Awaiting Payment',
-    createdAt: new Date().toISOString()
-  };
+    if (OXAPAY_MERCHANT_KEY && signature) {
+      const hmac = crypto.createHmac('sha512', OXAPAY_MERCHANT_KEY);
+      const expectedSignature = hmac.update(JSON.stringify(payload)).digest('hex');
+      if (signature !== expectedSignature) {
+        console.error('OXAPAY_WEBHOOK_INVALID_SIGNATURE');
+        return res.status(200).json({ ok: false, error: 'Invalid signature' });
+      }
+    }
 
-  userDepositsList.unshift(depositOrder);
+    const rawStatus = payload?.status;
 
-  res.json({
-    success: true,
-    message: 'Deposit invoice generated successfully',
-    order: depositOrder
-  });
+    if (rawStatus === 2 || rawStatus === 'Paid') {
+      const paidAmount = Number(payload.amount) || 0;
+      const trackId = payload.trackId ? String(payload.trackId) : '';
+
+      let deposit = null;
+      if (trackId) {
+        deposit = await prisma.deposit.findFirst({
+          where: {
+            OR: [
+              { txHash: trackId, status: 'PENDING' },
+              { id: trackId, status: 'PENDING' },
+              { adminNote: { contains: trackId }, status: 'PENDING' }
+            ]
+          }
+        });
+      }
+
+      if (!deposit) {
+        deposit = await prisma.deposit.findFirst({
+          where: {
+            amount: paidAmount,
+            status: 'PENDING'
+          }
+        });
+      }
+
+      if (deposit && deposit.status !== 'APPROVED') {
+        await prisma.$transaction(async (tx) => {
+          await tx.deposit.update({
+            where: { id: deposit.id },
+            data: { status: 'APPROVED' }
+          });
+
+          await tx.user.update({
+            where: { id: deposit.userId },
+            data: {
+              balance: { increment: deposit.amount },
+              totalDeposits: { increment: deposit.amount }
+            }
+          });
+
+          const existingTx = await tx.transaction.findFirst({
+            where: {
+              OR: [
+                { id: deposit.id },
+                { userId: deposit.userId, amount: deposit.amount, status: 'PENDING', type: 'DEPOSIT' }
+              ]
+            },
+            orderBy: { createdAt: 'desc' }
+          });
+          if (existingTx) {
+            await tx.transaction.update({
+              where: { id: existingTx.id },
+              data: {
+                status: 'COMPLETED',
+                description: `Automated Deposit of ${deposit.amount} (${deposit.currency}) via OxaPay`
+              }
+            });
+          } else {
+            await tx.transaction.create({
+              data: {
+                id: deposit.id,
+                userId: deposit.userId,
+                type: 'DEPOSIT',
+                amount: deposit.amount,
+                description: `Automated Deposit of ${deposit.amount} (${deposit.currency}) via OxaPay`,
+                status: 'COMPLETED'
+              }
+            });
+          }
+        });
+
+        return res.status(200).json({ ok: true, message: 'Deposit credited automatically' });
+      }
+    }
+
+    return res.status(200).json({ ok: true });
+  } catch (err) {
+    console.error('OXAPAY_WEBHOOK_ERROR:', err);
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// GET Deposit Status
+app.get(['/api/deposit/status/:id', '/api/deposits/status/:id'], async (req, res) => {
+  try {
+    const { id } = req.params;
+    const deposit = await prisma.deposit.findUnique({ where: { id } });
+
+    if (!deposit) {
+      return res.status(404).json({ success: false, message: 'Deposit record not found' });
+    }
+
+    const isConfirmed = deposit.status === 'APPROVED';
+
+    return res.json({
+      success: true,
+      status: deposit.status,
+      isConfirmed,
+      amount: deposit.amount,
+      paymentMethod: deposit.currency,
+      deposit
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: 'Failed to query deposit status' });
+  }
 });
 
 // POST confirm deposit with TXID
-app.post('/api/deposit/confirm', (req, res) => {
-  const { orderId, txHash } = req.body;
-  const order = userDepositsList.find(o => o.id === orderId);
-  if (!order) {
-    return res.status(404).json({ success: false, message: 'Order not found.' });
+app.post('/api/deposit/confirm', async (req, res) => {
+  try {
+    const { orderId, txHash } = req.body;
+    const deposit = await prisma.deposit.findUnique({ where: { id: orderId } });
+    if (!deposit) {
+      return res.status(404).json({ success: false, message: 'Deposit order not found.' });
+    }
+
+    const updated = await prisma.deposit.update({
+      where: { id: orderId },
+      data: {
+        txHash: txHash || '',
+        status: 'PENDING',
+        adminNote: `User submitted TXID: ${txHash}`
+      }
+    });
+
+    return res.json({
+      success: true,
+      message: 'Payment confirmation received. Your deposit will be credited after confirmation.',
+      order: updated
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: 'Failed to submit payment confirmation' });
   }
-
-  order.txHash = txHash || '';
-  order.status = 'Under Review';
-  order.confirmedAt = new Date().toISOString();
-
-  res.json({
-    success: true,
-    message: 'Payment confirmation received. Your deposit will be credited after blockchain confirmation.',
-    order
-  });
 });
 
 // GET user transactions endpoint
-app.get('/api/transactions', (req, res) => {
-  const allTx = [];
+app.get(['/api/transactions', '/api/user/transactions'], async (req, res) => {
+  try {
+    const user = await getAuthUser(req);
+    const userId = user ? user.id : req.query.userId;
 
-  withdrawalData.transactions.forEach(w => {
-    allTx.push({
-      id: w.id,
-      type: 'WITHDRAWAL',
-      description: `Withdrawal request to ${w.destination || 'crypto wallet'}`,
-      amount: w.amount,
-      gateway: w.currency,
-      status: w.status,
-      created_at: w.createdAt
+    const whereClause = userId ? { userId } : {};
+    const transactions = await prisma.transaction.findMany({
+      where: whereClause,
+      orderBy: { createdAt: 'desc' }
     });
-  });
 
-  userDepositsList.forEach(d => {
-    allTx.push({
-      id: d.id,
-      type: 'DEPOSIT',
-      description: `Deposit via ${d.processorName || 'Crypto'} (${d.planName})`,
-      amount: d.amount,
-      gateway: d.processorName,
-      status: d.status,
-      created_at: d.createdAt
+    const formatted = transactions.map(t => ({
+      id: t.id,
+      type: t.type,
+      description: t.description,
+      amount: t.amount,
+      status: t.status,
+      created_at: t.createdAt,
+      createdAt: t.createdAt
+    }));
+
+    return res.json({
+      success: true,
+      transactions: formatted,
+      data: formatted
     });
-  });
-
-  allTx.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-
-  res.json({
-    success: true,
-    transactions: allTx
-  });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: 'Failed to fetch user transactions' });
+  }
 });
 
 // GET user referral statistics and team list
-app.get('/api/referrals', (req, res) => {
-  res.json({
-    success: true,
-    totalMembers: 2,
-    teamCommission: 204.00,
-    referrals: [
-      {
-        id: 'ref-1',
-        username: 'Mashezyy',
+app.get(['/api/referrals', '/api/user/referrals'], async (req, res) => {
+  try {
+    const user = await getAuthUser(req);
+    if (!user) {
+      return res.json({
+        success: true,
+        totalMembers: 0,
+        totalActiveReferrals: 0,
+        teamCommission: 0.00,
+        referrals: []
+      });
+    }
+
+    const team = await prisma.user.findMany({
+      where: { referredById: user.id },
+      include: { deposits: true },
+      orderBy: { createdAt: 'desc' }
+    });
+
+    const activeMembersCount = team.filter(m => {
+      const hasDeposits = m.deposits && m.deposits.some(d => d.status === 'APPROVED' || d.status === 'ACTIVE' || d.status === 'COMPLETED');
+      const hasBalance = parseFloat(m.balance || 0) > 0 || parseFloat(m.stakedBalance || 0) > 0 || parseFloat(m.totalDeposits || 0) > 0;
+      return !m.isSuspended && (hasDeposits || hasBalance);
+    }).length;
+
+    const referralsList = team.map(m => {
+      const hasDeposits = m.deposits && m.deposits.some(d => d.status === 'APPROVED' || d.status === 'ACTIVE' || d.status === 'COMPLETED');
+      const hasBalance = parseFloat(m.balance || 0) > 0 || parseFloat(m.stakedBalance || 0) > 0 || parseFloat(m.totalDeposits || 0) > 0;
+      const isActive = !m.isSuspended && (hasDeposits || hasBalance);
+
+      return {
+        id: m.id,
+        username: m.username || m.email,
         level: 'Level 1',
-        registeredAt: '2026-09-09T15:53:52.000Z',
-        status: 'Active'
-      },
-      {
-        id: 'ref-2',
-        username: 'everstakesupport',
-        level: 'Level 1',
-        registeredAt: '2026-09-08T13:14:43.000Z',
-        status: 'Active'
+        registeredAt: m.createdAt,
+        created_at: m.createdAt,
+        status: m.isSuspended ? 'Suspended' : (isActive ? 'Active' : 'Inactive'),
+        isActive,
+        commission: 0.00
+      };
+    });
+
+    return res.json({
+      success: true,
+      totalMembers: team.length,
+      totalActiveReferrals: activeMembersCount,
+      teamCommission: parseFloat(user.referralCommissions || 0),
+      referrals: referralsList
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: 'Failed to fetch referrals' });
+  }
+});
+
+// GET user dashboard statistics & recent transactions
+app.get('/api/user/dashboard', async (req, res) => {
+  try {
+    const user = await getAuthUser(req);
+
+    if (!user) {
+      return res.json({
+        success: true,
+        user: null,
+        data: {
+          balance: 0.00,
+          earnedTotal: 0.00,
+          totalDeposit: 0.00,
+          lastDeposit: 0.00,
+          pendingWithdrawal: 0.00,
+          withdrewTotal: 0.00,
+          lastWithdrawal: 0.00,
+          transactions: []
+        }
+      });
+    }
+
+    // Real-time staking yield processing on user dashboard fetch (matching stakelab-backend pattern)
+    try {
+      await runProfitPayouts(user.id);
+    } catch (yieldErr) {
+      console.error('[YIELD] Error processing user yields on dashboard fetch:', yieldErr.message);
+    }
+
+    // Refresh user records with latest yields and balances
+    const freshUser = await prisma.user.findUnique({
+      where: { id: user.id },
+      include: {
+        deposits: { orderBy: { createdAt: 'desc' } },
+        withdrawals: { orderBy: { createdAt: 'desc' } },
+        transactions: { orderBy: { createdAt: 'desc' } }
       }
-    ]
-  });
+    });
+    const activeUser = freshUser || user;
+
+    // Real database calculations for this user
+    const approvedDeposits = activeUser.deposits.filter(d => d.status === 'APPROVED');
+    const totalDeposit = approvedDeposits.reduce((acc, d) => acc + parseFloat(d.amount || 0), 0);
+    const lastDepositObj = activeUser.deposits.length > 0 ? activeUser.deposits[0] : null;
+    const lastDeposit = lastDepositObj ? parseFloat(lastDepositObj.amount || 0) : 0.00;
+
+    const pendingWithdrawals = activeUser.withdrawals.filter(w => w.status === 'PENDING');
+    const pendingWithdrawal = pendingWithdrawals.reduce((acc, w) => acc + parseFloat(w.amount || 0), 0);
+    const approvedWithdrawals = activeUser.withdrawals.filter(w => w.status === 'APPROVED');
+    const withdrewTotal = approvedWithdrawals.reduce((acc, w) => acc + parseFloat(w.amount || 0), 0);
+    const lastWithdrawalObj = activeUser.withdrawals.length > 0 ? activeUser.withdrawals[0] : null;
+    const lastWithdrawal = lastWithdrawalObj ? parseFloat(lastWithdrawalObj.amount || 0) : 0.00;
+
+    const transactions = activeUser.transactions.map(t => ({
+      id: t.id,
+      type: t.type,
+      description: t.description,
+      amount: t.amount,
+      status: t.status,
+      created_at: t.createdAt,
+      createdAt: t.createdAt
+    }));
+
+    return res.json({
+      success: true,
+      user: {
+        id: activeUser.id,
+        email: activeUser.email,
+        username: activeUser.username,
+        fullName: activeUser.fullName,
+        balance: parseFloat(activeUser.balance || 0),
+        btcBalance: parseFloat(activeUser.btcBalance || 0),
+        usdtTrc20Balance: parseFloat(activeUser.usdtTrc20Balance || 0),
+        usdtBep20Balance: parseFloat(activeUser.usdtBep20Balance || 0),
+        ltcBalance: parseFloat(activeUser.ltcBalance || 0),
+        stakedBalance: parseFloat(activeUser.stakedBalance || 0),
+        adminNote: activeUser.adminNote || '',
+        admin_note: activeUser.adminNote || '',
+        deposits: activeUser.deposits,
+        withdrawals: activeUser.withdrawals,
+        createdAt: activeUser.createdAt
+      },
+      data: {
+        balance: parseFloat(activeUser.balance || 0),
+        btcBalance: parseFloat(activeUser.btcBalance || 0),
+        usdtTrc20Balance: parseFloat(activeUser.usdtTrc20Balance || 0),
+        usdtBep20Balance: parseFloat(activeUser.usdtBep20Balance || 0),
+        ltcBalance: parseFloat(activeUser.ltcBalance || 0),
+        stakedBalance: parseFloat(activeUser.stakedBalance || 0),
+        adminNote: activeUser.adminNote || '',
+        admin_note: activeUser.adminNote || '',
+        earnedTotal: parseFloat(activeUser.totalEarnings || 0),
+        totalDeposit,
+        lastDeposit,
+        pendingWithdrawal,
+        withdrewTotal,
+        lastWithdrawal,
+        transactions: transactions.slice(0, 10)
+      }
+    });
+  } catch (error) {
+    console.error('User dashboard API error:', error);
+    return res.status(500).json({ success: false, message: 'Failed to load user dashboard stats' });
+  }
+});
+
+
+// POST support ticket / contact message
+app.post(['/api/support', '/api/support/ticket'], async (req, res) => {
+  try {
+    const { name, email, message, subject } = req.body;
+    const authUser = await getAuthUser(req);
+    const ticketId = 'TCK-' + Math.floor(100000 + Math.random() * 900000);
+
+    const ticket = await prisma.supportTicket.create({
+      data: {
+        ticketId,
+        userId: authUser?.id || null,
+        name: name || authUser?.fullName || 'Anonymous',
+        email: email || authUser?.email || '',
+        subject: subject || 'Support Request from Contact Form',
+        message: message || '',
+        status: 'OPEN',
+        priority: 'MEDIUM',
+        messages: {
+          create: [
+            {
+              senderRole: 'USER',
+              senderName: name || authUser?.fullName || 'User',
+              message: message || ''
+            }
+          ]
+        }
+      }
+    });
+
+    return res.status(201).json({ success: true, message: 'Support ticket submitted successfully', ticket });
+  } catch (err) {
+    console.error('Failed to create support ticket:', err);
+    return res.status(500).json({ success: false, message: 'Failed to create support ticket' });
+  }
+});
+
+// Manual / External endpoint to run profit & yield cron on demand
+app.all(['/api/cron/run', '/api/cron/run-yields', '/api/admin/cron/run'], async (req, res) => {
+  try {
+    const stats = await runProfitPayouts();
+    return res.json({
+      success: true,
+      message: 'Automated profit payout cron executed successfully.',
+      timestamp: new Date(),
+      stats
+    });
+  } catch (err) {
+    console.error('Manual cron trigger error:', err);
+    return res.status(500).json({ success: false, message: 'Cron execution error: ' + err.message });
+  }
 });
 
 app.listen(PORT, () => {
   console.log(`[digital-backend] Server running on http://localhost:${PORT}`);
+  // Initialize Automated Investment Yield & Profit Engine (every 60s)
+  initCron();
 });
 

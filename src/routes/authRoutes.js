@@ -4,6 +4,82 @@ import jwt from 'jsonwebtoken';
 import prisma from '../lib/prisma.js';
 import { sendEmail } from '../services/emailService.js';
 
+
+export const getClientIp = (req) => {
+  let ip =
+    req.headers['x-forwarded-for'] ||
+    req.headers['x-real-ip'] ||
+    req.connection?.remoteAddress ||
+    req.socket?.remoteAddress ||
+    req.ip ||
+    '127.0.0.1';
+
+  if (typeof ip === 'string' && ip.includes(',')) {
+    ip = ip.split(',')[0];
+  }
+
+  if (typeof ip === 'string') {
+    ip = ip.replace(/^::ffff:/, '').trim();
+    if (ip === '::1' || ip === 'localhost') {
+      ip = '127.0.0.1';
+    }
+  }
+
+  return ip || '127.0.0.1';
+};
+
+export const parseUserAgent = (uaString = '') => {
+  let browser = 'Chrome';
+  let os = 'Windows';
+
+  if (!uaString) return { browser, os };
+
+  if (uaString.includes('Firefox')) browser = 'Firefox';
+  else if (uaString.includes('Edg')) browser = 'Edge';
+  else if (uaString.includes('Chrome')) browser = 'Chrome';
+  else if (uaString.includes('Safari')) browser = 'Safari';
+  else if (uaString.includes('Opera') || uaString.includes('OPR')) browser = 'Opera';
+
+  if (uaString.includes('Windows')) os = 'Windows';
+  else if (uaString.includes('Macintosh') || uaString.includes('Mac OS')) os = 'macOS';
+  else if (uaString.includes('Linux')) os = 'Linux';
+  else if (uaString.includes('Android')) os = 'Android';
+  else if (uaString.includes('iPhone') || uaString.includes('iPad')) os = 'iOS';
+
+  return { browser, os };
+};
+
+export const recordUserLogin = async (user, req) => {
+  try {
+    const clientIp = getClientIp(req);
+    const userAgent = req.headers['user-agent'] || '';
+    const { browser, os } = parseUserAgent(userAgent);
+    const now = new Date();
+
+    const updatedUser = await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        lastLoginAt: now,
+        lastLoginIp: clientIp,
+      },
+    });
+
+    await prisma.loginLog.create({
+      data: {
+        userId: user.id,
+        ip: clientIp,
+        browser,
+        os,
+      },
+    });
+
+    return updatedUser;
+  } catch (err) {
+    console.error('Error recording user login IP:', err);
+    return user;
+  }
+};
+
 const router = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET || 'digital-project-secret-key-2026';
 
@@ -15,7 +91,23 @@ const formatUser = (user) => ({
   fullName: user.fullName || user.username || 'User',
   full_name: user.fullName || user.username || 'User',
   role: user.role,
-  balance: user.balance || 0,
+  balance: Number(user.balance || 0),
+  btcBalance: Number(user.btcBalance || 0),
+  btc_balance: Number(user.btcBalance || 0),
+  usdtTrc20Balance: Number(user.usdtTrc20Balance || 0),
+  usdt_trc20_balance: Number(user.usdtTrc20Balance || 0),
+  usdtBep20Balance: Number(user.usdtBep20Balance || 0),
+  usdt_bep20_balance: Number(user.usdtBep20Balance || 0),
+  ltcBalance: Number(user.ltcBalance || 0),
+  ltc_balance: Number(user.ltcBalance || 0),
+  stakedBalance: Number(user.stakedBalance || 0),
+  staked_balance: Number(user.stakedBalance || 0),
+  totalEarnings: Number(user.totalEarnings || 0),
+  total_earning: Number(user.totalEarnings || 0),
+  totalDeposits: Number(user.totalDeposits || 0),
+  total_deposit: Number(user.totalDeposits || 0),
+  totalWithdrawals: Number(user.totalWithdrawals || 0),
+  total_withdrawal: Number(user.totalWithdrawals || 0),
   secretQuestion: user.secretQuestion,
   referralCode: user.referralCode,
   isEmailVerified: user.isEmailVerified,
@@ -24,6 +116,12 @@ const formatUser = (user) => ({
   usdtBep20Address: user.usdtBep20Address || '',
   litecoinAddress: user.litecoinAddress || '',
   createdAt: user.createdAt,
+  lastLoginAt: user.lastLoginAt,
+  last_login_at: user.lastLoginAt,
+  lastLoginIp: user.lastLoginIp || 'N/A',
+  last_login_ip: user.lastLoginIp || 'N/A',
+  adminNote: user.adminNote || '',
+  admin_note: user.adminNote || '',
 });
 
 // POST /api/auth/register
@@ -137,9 +235,10 @@ router.post(['/login', '/admin/login'], async (req, res) => {
       return res.status(401).json({ success: false, message: 'Invalid email or password' });
     }
 
+    const updatedUser = await recordUserLogin(user, req);
     const isRemember = Boolean(remember_me || remember);
     const expiresIn = isRemember ? '24h' : '1h';
-    const token = jwt.sign({ id: user.id, email: user.email, role: user.role }, JWT_SECRET, { expiresIn });
+    const token = jwt.sign({ id: updatedUser.id, email: updatedUser.email, role: updatedUser.role }, JWT_SECRET, { expiresIn });
 
     return res.json({
       success: true,
@@ -337,13 +436,14 @@ router.post('/admin/login', async (req, res) => {
       return res.status(401).json({ success: false, message: 'Invalid username or password' });
     }
 
-    const token = jwt.sign({ id: adminUser.id, email: adminUser.email, role: 'ADMIN' }, JWT_SECRET, { expiresIn: '7d' });
+    const updatedUser = await recordUserLogin(adminUser, req);
+    const token = jwt.sign({ id: updatedUser.id, email: updatedUser.email, role: 'ADMIN' }, JWT_SECRET, { expiresIn: '7d' });
 
     return res.json({
       success: true,
       message: 'Admin login successful',
       token,
-      admin: formatUser(adminUser),
+      admin: formatUser(updatedUser),
     });
   } catch (error) {
     console.error('Admin login error:', error);
@@ -473,7 +573,7 @@ const handleUpdateProfile = async (req, res) => {
         const token = authHeader.split(' ')[1];
         const decoded = jwt.verify(token, JWT_SECRET);
         userId = decoded.id;
-      } catch (e) {}
+      } catch (e) { }
     }
 
     const {

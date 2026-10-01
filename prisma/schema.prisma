@@ -8,29 +8,252 @@ datasource db {
 }
 
 model User {
-  id               String      @id @default(uuid())
-  email            String      @unique
-  username         String?     @unique
-  fullName         String?
-  password         String
-  secretQuestion   String?
-  secretAnswer     String?
-  referralCode     String?
-  role             String      @default("USER") // "USER" or "ADMIN"
-  isEmailVerified  Boolean     @default(true)
-  otpCode          String?
-  otpExpiresAt     DateTime?
-  balance          Float       @default(0)
+  id                  String           @id @default(uuid())
+  email               String           @unique
+  username            String?          @unique
+  fullName            String?
+  password            String
+  secretQuestion      String?
+  secretAnswer        String?
+  referralCode        String?
+  referredById        String?
+  role                String           @default("USER") // "USER" or "ADMIN"
+  isEmailVerified     Boolean          @default(true)
+  isSuspended         Boolean          @default(false)
+  otpCode             String?
+  otpExpiresAt        DateTime?
+  balance             Float            @default(0)
+  btcBalance          Float            @default(0)
+  usdtTrc20Balance    Float            @default(0)
+  usdtBep20Balance    Float            @default(0)
+  ltcBalance          Float            @default(0)
+  stakedBalance       Float            @default(0)
+  totalEarnings       Float            @default(0)
+  totalDeposits       Float            @default(0)
+  totalWithdrawals    Float            @default(0)
+  referralCommissions Float            @default(0)
 
-  bitcoinAddress   String?     @default("")
-  usdtTrc20Address String?     @default("")
-  usdtBep20Address String?     @default("")
-  litecoinAddress  String?     @default("")
+  mobile              String?
+  country             String?
+  adminNote           String?
 
-  createdAt        DateTime    @default(now())
-  updatedAt        DateTime    @updatedAt
+  bitcoinAddress      String?          @default("")
+  usdtTrc20Address    String?          @default("")
+  usdtBep20Address    String?          @default("")
+  litecoinAddress     String?          @default("")
 
-  emailLogs        EmailLog[]
+  lastLoginAt         DateTime?
+  lastLoginIp         String?
+
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @default(now()) @updatedAt
+
+  referredBy          User?            @relation("UserReferrals", fields: [referredById], references: [id], onDelete: SetNull)
+  referrals           User[]           @relation("UserReferrals")
+
+  deposits            Deposit[]
+  withdrawals         Withdrawal[]
+  transactions        Transaction[]
+  supportTickets      SupportTicket[]
+  ticketMessages      TicketMessage[]
+  emailLogs           EmailLog[]
+  loginLogs           LoginLog[]
+
+}
+
+model Deposit {
+  id            String    @id @default(uuid())
+  userId        String
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  planId        String?
+  planName      String?
+  amount        Float
+  currency      String    @default("USDT (TRC20)")
+  paymentMethod String    @default("crypto") // "balance" | "crypto"
+  walletAddress String?
+  txHash        String?
+  status            String    @default("PENDING") // "PENDING", "APPROVED", "REJECTED", "COMPLETED"
+  adminNote         String?
+  lastProfitAt      DateTime?
+  totalProfitEarned Float     @default(0)
+  payoutsCount      Int       @default(0)
+  completedAt       DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @default(now()) @updatedAt
+
+  @@map("deposits")
+}
+
+model Withdrawal {
+  id            String    @id @default(uuid())
+  userId        String
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  amount        Float
+  charge        Float     @default(0)
+  netAmount     Float
+  currency      String    @default("USDT (TRC20)")
+  walletAddress String
+  status        String    @default("PENDING") // "PENDING", "APPROVED", "REJECTED"
+  adminNote     String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @default(now()) @updatedAt
+
+  @@map("withdrawals")
+}
+
+model Transaction {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type        String   // "DEPOSIT", "WITHDRAWAL", "PROFIT", "BONUS", "PENALTY", "COMMISSION", "STAKE"
+  amount      Float
+  description String
+  status      String   @default("COMPLETED")
+  createdAt   DateTime @default(now())
+
+  @@map("transactions")
+}
+
+model SupportTicket {
+  id        String          @id @default(uuid())
+  ticketId  String          @unique
+  userId    String?
+  user      User?           @relation(fields: [userId], references: [id], onDelete: SetNull)
+  name      String?
+  email     String?
+  subject   String
+  status    String          @default("OPEN") // "OPEN", "ANSWERED", "CUSTOMER_REPLY", "CLOSED"
+  priority  String          @default("MEDIUM") // "LOW", "MEDIUM", "HIGH"
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @default(now()) @updatedAt
+
+  messages  TicketMessage[]
+
+  @@map("support_tickets")
+}
+
+model TicketMessage {
+  id          String        @id @default(uuid())
+  ticketId    String
+  ticket      SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  userId      String?
+  user        User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+  senderType  String        @default("USER") // "USER" | "ADMIN"
+  senderName  String?
+  message     String
+  attachments String?       // JSON string of attachments
+  createdAt   DateTime      @default(now())
+
+  @@map("ticket_messages")
+}
+
+model GiftBonus {
+  id        String   @id @default(uuid())
+  code      String   @unique
+  amount    Float
+  maxUses   Int      @default(1)
+  usedCount Int      @default(0)
+  status    String   @default("ACTIVE") // "ACTIVE", "EXHAUSTED", "EXPIRED"
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
+
+  @@map("gift_bonuses")
+}
+
+model EarningHoliday {
+  id          String    @id @default(uuid())
+  date        String
+  rawDate     DateTime?
+  description String
+  createdAt   DateTime  @default(now())
+
+  @@map("earning_holidays")
+}
+
+model UserNotice {
+  id            String    @id @default(uuid())
+  title         String
+  startDate     String
+  rawStartDate  DateTime?
+  expiresInDays Int       @default(0)
+  targetUsers   String    @default("All Users")
+  content       String
+  status        String    @default("ACTIVE")
+  createdAt     DateTime  @default(now())
+
+  @@map("user_notices")
+}
+
+model InvestmentPlan {
+  id               String   @id @default(uuid())
+  name             String
+  planLabel        String?  @default("Plan")
+  minAmount        Float    @default(10)
+  maxAmount        Float?
+  dailyProfit      Float    @default(1.5)
+  profitType       String   @default("Daily Profit (%)")
+  durationDays     Int      @default(30)
+  durationHours    Int?
+  paymentPeriod    String?  @default("Daily")
+  capitalReturn    Boolean  @default(true)
+  isCompounding    Boolean  @default(false)
+  holdEarningsDays Int      @default(0)
+  delayEarningDays Int      @default(0)
+  isPromo          Boolean  @default(false)
+  status           String   @default("Active")
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @default(now()) @updatedAt
+
+  @@map("investment_plans")
+}
+
+model ProfitLog {
+  id        String   @id @default(uuid())
+  userId    String
+  depositId String?
+  planName  String?
+  amount    Float
+  rate      Float?
+  cycleType String   @default("DAILY")
+  paidAt    DateTime @default(now())
+  createdAt DateTime @default(now())
+
+  @@map("profit_logs")
+}
+
+model LoginLog {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ip        String
+  browser   String?
+  os        String?
+  createdAt DateTime @default(now())
+
+  @@map("login_logs")
+}
+
+model CompanyWallet {
+  id        String   @id @default(uuid())
+  currency  String   @unique // "bitcoin", "usdt_trc20", "usdt_bep20", "litecoin"
+  name      String
+  address   String
+  network   String
+  updatedAt DateTime @default(now()) @updatedAt
+
+  @@map("company_wallets")
+}
+
+model SecuritySetting {
+  id               String   @id @default(uuid())
+  ipSensitivity    String   @default("disabled")
+  browserChange    String   @default("disabled")
+  twoFactorEnabled Boolean  @default(false)
+  secretCode       String?
+  otpAuthUrl       String?
+  updatedAt        DateTime @default(now()) @updatedAt
+
+  @@map("security_settings")
 }
 
 model EmailSettings {
@@ -39,7 +262,7 @@ model EmailSettings {
   smtp_port                    Int      @default(587)
   smtp_user                    String   @default("")
   smtp_pass                    String   @default("")
-  from_email                   String   @default("noreply@digitalxtrade.vip")
+  from_email                   String   @default("noreply@digitalxtrade.com")
   from_name                    String   @default("DigitalXTrade Protocol")
   
   notify_deposit_processing     Boolean  @default(true)
@@ -50,7 +273,7 @@ model EmailSettings {
   notify_withdrawal_rejected    Boolean  @default(true)
   notify_profit_return          Boolean  @default(true)
 
-  updatedAt                    DateTime @updatedAt
+  updatedAt                    DateTime @default(now()) @updatedAt
 
   @@map("email_settings")
 }
@@ -75,8 +298,8 @@ model Settings {
   site_name       String   @default("DigitalXTrade")
   site_title      String   @default("DigitalXTrade - Next Gen Crypto Staking & Trading Protocol")
   site_logo       String?
-  site_url        String   @default("https://digitalxtrade.vip")
-  updatedAt       DateTime @updatedAt
+  site_url        String   @default("https://digitalxtrade.com")
+  updatedAt       DateTime @default(now()) @updatedAt
 
   @@map("settings")
 }

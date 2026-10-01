@@ -142,7 +142,7 @@ export const sendEmail = async ({ to, subject, html, emailType, userId }) => {
     formattedSubject = emailType === 'FREE_SPIN_REWARD'
       ? (subject || 'Notification').replace(/stakelab|everstake/gi, siteName)
       : stripEmojisAndIcons(subject || 'Notification').replace(/stakelab|everstake/gi, siteName);
-      
+
     const formattedHtml = renderEmailTemplate({
       siteName,
       siteLogo,
@@ -165,7 +165,7 @@ export const sendEmail = async ({ to, subject, html, emailType, userId }) => {
         await axios.post(
           url,
           {
-            fromAddress: process.env.ZOHO_FROM_EMAIL || 'info@digitalxtrade.vip',
+            fromAddress: process.env.ZOHO_FROM_EMAIL || 'info@digitalxtrade.com',
             toAddress: to,
             subject: formattedSubject,
             content: formattedHtml,
@@ -189,7 +189,7 @@ export const sendEmail = async ({ to, subject, html, emailType, userId }) => {
               email_type: emailType || 'NOTIFICATION',
               status: 'SENT',
             },
-          }).catch(() => {});
+          }).catch(() => { });
         }
         return { success: true };
       } catch (zohoErr) {
@@ -205,7 +205,7 @@ export const sendEmail = async ({ to, subject, html, emailType, userId }) => {
         smtp_port: parseInt(process.env.SMTP_PORT || '587'),
         smtp_user: process.env.SMTP_USER || '',
         smtp_pass: process.env.SMTP_PASS || '',
-        from_email: process.env.FROM_EMAIL || 'noreply@digitalxtrade.vip',
+        from_email: process.env.FROM_EMAIL || 'noreply@digitalxtrade.com',
         from_name: process.env.FROM_NAME || siteName,
       };
     }
@@ -237,7 +237,7 @@ export const sendEmail = async ({ to, subject, html, emailType, userId }) => {
             email_type: emailType || 'NOTIFICATION',
             status: 'SENT',
           },
-        }).catch(() => {});
+        }).catch(() => { });
       }
       return { success: true };
     }
@@ -253,7 +253,7 @@ export const sendEmail = async ({ to, subject, html, emailType, userId }) => {
           email_type: emailType || 'SIMULATED',
           status: 'SIMULATED',
         },
-      }).catch(() => {});
+      }).catch(() => { });
     }
     return { success: true, simulated: true };
   } catch (error) {
@@ -268,7 +268,7 @@ export const sendEmail = async ({ to, subject, html, emailType, userId }) => {
           status: 'FAILED',
           error_msg: error.message,
         },
-      }).catch(() => {});
+      }).catch(() => { });
     }
     return { success: false, error: error.message };
   }
