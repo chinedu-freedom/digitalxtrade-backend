@@ -244,6 +244,7 @@ export async function runProfitPayouts(targetUserId = null) {
             userUpdate.stakedBalance = { increment: totalCyclePayout };
           } else {
             // Immediately available in account balance
+            userUpdate.profitBalance = { increment: totalCyclePayout };
             userUpdate.balance = { increment: totalCyclePayout };
 
             // Also increment currency field if matched

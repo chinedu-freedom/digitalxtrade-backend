@@ -23,6 +23,8 @@ model User {
   otpCode             String?
   otpExpiresAt        DateTime?
   balance             Float            @default(0)
+  depositBalance      Float            @default(0)
+  profitBalance       Float            @default(0)
   btcBalance          Float            @default(0)
   usdtTrc20Balance    Float            @default(0)
   usdtBep20Balance    Float            @default(0)

@@ -391,38 +391,38 @@ app.post(['/api/user/deposits/:id/cancel', '/api/investments/:id/cancel', '/api/
 
 // POST submit a withdrawal request
 app.post('/api/withdraw', async (req, res) => {
-  try {
-    const { currencyId, amount, address } = req.body;
-    const numAmount = parseFloat(amount);
-    const user = await getAuthUser(req);
+    try {
+      const { currencyId, amount, address, walletType, wallet_type } = req.body;
+      const numAmount = parseFloat(amount);
+      const user = await getAuthUser(req);
 
-    if (!user) {
-      return res.status(401).json({ success: false, message: 'Please login to submit a withdrawal.' });
-    }
+      if (!user) {
+        return res.status(401).json({ success: false, message: 'Please login to submit a withdrawal.' });
+      }
 
-    if (isNaN(numAmount) || numAmount <= 0) {
-      return res.status(400).json({ success: false, message: 'Please enter a valid withdrawal amount.' });
-    }
+      if (isNaN(numAmount) || numAmount <= 0) {
+        return res.status(400).json({ success: false, message: 'Please enter a valid withdrawal amount.' });
+      }
 
-    let targetWalletField = 'usdtTrc20Balance';
-    if (currencyId === 'bitcoin') targetWalletField = 'btcBalance';
-    else if (currencyId === 'usdt_bep20') targetWalletField = 'usdtBep20Balance';
-    else if (currencyId === 'litecoin') targetWalletField = 'ltcBalance';
+      const chosenWallet = (walletType || wallet_type || 'profit').toLowerCase();
+      const depositBal = parseFloat(user.depositBalance || user.deposit_balance || 0);
+      const profitBal = parseFloat(user.profitBalance || user.profit_balance || 0);
+      const totalUserBal = parseFloat(user.balance || 0);
 
-    let availableWalletBal = parseFloat(user[targetWalletField] || 0);
-    const totalUserBal = parseFloat(user.balance || 0);
+      let availableWalletBal = chosenWallet === 'deposit' ? depositBal : profitBal;
 
-    // Fallback if legacy user balance was credited to main balance directly
-    if (user.btcBalance === 0 && user.usdtTrc20Balance === 0 && user.usdtBep20Balance === 0 && user.ltcBalance === 0 && totalUserBal > 0) {
-      availableWalletBal = totalUserBal;
-    }
+      // Fallback if balances were non-zero on main balance directly
+      if (depositBal + profitBal === 0 && totalUserBal > 0) {
+        availableWalletBal = totalUserBal;
+      }
 
-    if (numAmount > availableWalletBal) {
-      return res.status(400).json({
-        success: false,
-        message: `Insufficient balance in ${currencyId.toUpperCase()}. Available: ${availableWalletBal.toFixed(2)}`
-      });
-    }
+      if (numAmount > availableWalletBal) {
+        const walletName = chosenWallet === 'deposit' ? 'Deposit Balance (Capital)' : 'Profit Balance (Earnings)';
+        return res.status(400).json({
+          success: false,
+          message: `Insufficient ${walletName} (${availableWalletBal.toFixed(2)}). You requested ${numAmount.toFixed(2)}.`
+        });
+      }
 
     const minWithdrawal = currencyId === 'bitcoin' ? 20.00 : currencyId === 'litecoin' ? 15.00 : 10.00;
     if (numAmount < minWithdrawal) {
@@ -449,26 +449,32 @@ app.post('/api/withdraw', async (req, res) => {
     }
 
     // Deduct user balance in PostgreSQL
-    const dataToDecrement = { balance: { decrement: numAmount } };
-    if (currencyId === 'bitcoin') dataToDecrement.btcBalance = { decrement: numAmount };
-    else if (currencyId === 'usdt_trc20') dataToDecrement.usdtTrc20Balance = { decrement: numAmount };
-    else if (currencyId === 'usdt_bep20') dataToDecrement.usdtBep20Balance = { decrement: numAmount };
-    else if (currencyId === 'litecoin') dataToDecrement.ltcBalance = { decrement: numAmount };
+      const dataToDecrement = { balance: { decrement: numAmount } };
+      if (chosenWallet === 'deposit') {
+        dataToDecrement.depositBalance = { decrement: numAmount };
+      } else {
+        dataToDecrement.profitBalance = { decrement: numAmount };
+      }
 
-    const updatedUser = await prisma.user.update({
-      where: { id: user.id },
-      data: dataToDecrement
-    });
+      const updatedUser = await prisma.user.update({
+        where: { id: user.id },
+        data: dataToDecrement
+      });
 
     const currencyName = currencyId === 'bitcoin' ? 'BTC' : currencyId === 'litecoin' ? 'LTC' : (currencyId === 'usdt_bep20' ? 'USDT-BEP20' : 'USDT-TRC20');
+
+    // Calculate 50% early withdrawal fee for Deposit Balance (Capital Wallet)
+    const feeRate = chosenWallet === 'deposit' ? 0.50 : 0.00;
+    const charge = numAmount * feeRate;
+    const netAmount = numAmount - charge;
 
     // Create persistent Withdrawal record
     const withdrawal = await prisma.withdrawal.create({
       data: {
         userId: user.id,
         amount: numAmount,
-        netAmount: numAmount,
-        charge: 0,
+        netAmount: netAmount,
+        charge: charge,
         currency: currencyName,
         walletAddress: targetAddress,
         status: 'PENDING'
@@ -481,14 +487,20 @@ app.post('/api/withdraw', async (req, res) => {
         userId: user.id,
         type: 'WITHDRAWAL',
         amount: numAmount,
-        description: `Withdrawal request of $${numAmount.toFixed(2)} to ${targetAddress} (${currencyName})`,
+        description: chosenWallet === 'deposit'
+          ? `Deposit balance withdrawal of ${numAmount.toFixed(2)} (50% fee: ${charge.toFixed(2)}, Net Payout: ${netAmount.toFixed(2)}) to ${targetAddress} (${currencyName})`
+          : `Profit balance withdrawal of ${numAmount.toFixed(2)} to ${targetAddress} (${currencyName})`,
         status: 'PENDING'
       }
     });
 
+    const successMsg = chosenWallet === 'deposit'
+      ? `Withdrawal request for ${numAmount.toFixed(2)} submitted! 50% capital withdrawal fee applied (Fee: ${charge.toFixed(2)}, Net Payout: ${netAmount.toFixed(2)}).`
+      : `Withdrawal request for ${numAmount.toFixed(2)} submitted successfully!`;
+
     return res.json({
       success: true,
-      message: `Withdrawal request for $${numAmount.toFixed(2)} submitted successfully!`,
+      message: successMsg,
       withdrawal,
       newBalance: updatedUser.balance
     });
@@ -672,7 +684,7 @@ app.post(['/api/deposit', '/api/deposits'], async (req, res) => {
         });
       }
 
-      // Deduct from specific currency balance & total balance, add to staked balance in PostgreSQL
+      // Deduct from specific currency balance & user wallet (profit/deposit), add to staked balance in PostgreSQL
       const updateData = {
         balance: { decrement: numAmount },
         stakedBalance: { increment: numAmount },
@@ -680,6 +692,21 @@ app.post(['/api/deposit', '/api/deposits'], async (req, res) => {
       };
       if (currencyBalanceField) {
         updateData[currencyBalanceField] = { decrement: numAmount };
+      }
+
+      // Decrement profitBalance or depositBalance accordingly
+      const requestedWallet = (req.body.walletType || req.body.wallet_type || '').toLowerCase();
+      const userProfit = parseFloat(user.profitBalance || user.profit_balance || 0);
+      const userDeposit = parseFloat(user.depositBalance || user.deposit_balance || 0);
+
+      if (requestedWallet === 'profit' && userProfit >= numAmount) {
+        updateData.profitBalance = { decrement: numAmount };
+      } else if (requestedWallet === 'deposit' && userDeposit >= numAmount) {
+        updateData.depositBalance = { decrement: numAmount };
+      } else if (userProfit >= numAmount) {
+        updateData.profitBalance = { decrement: numAmount };
+      } else if (userDeposit >= numAmount) {
+        updateData.depositBalance = { decrement: numAmount };
       }
 
       const updatedUser = await prisma.user.update({
@@ -1269,3 +1296,5 @@ app.listen(PORT, () => {
   initCron();
 });
 
+
+// Nodemon reload trigger: 1790878412871

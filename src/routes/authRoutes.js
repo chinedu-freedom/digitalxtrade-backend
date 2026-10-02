@@ -92,6 +92,10 @@ const formatUser = (user) => ({
   full_name: user.fullName || user.username || 'User',
   role: user.role,
   balance: Number(user.balance || 0),
+  depositBalance: Number(user.depositBalance || 0),
+  deposit_balance: Number(user.depositBalance || 0),
+  profitBalance: Number(user.profitBalance || 0),
+  profit_balance: Number(user.profitBalance || 0),
   btcBalance: Number(user.btcBalance || 0),
   btc_balance: Number(user.btcBalance || 0),
   usdtTrc20Balance: Number(user.usdtTrc20Balance || 0),
@@ -213,7 +217,7 @@ router.post(['/login', '/admin/login'], async (req, res) => {
 
     // Auto-create default admin user if logging in as admin@stakelab.io or admin
     if (!user && (identifier === 'admin@stakelab.io' || identifier === 'admin' || identifier === 'admin@stakelab.com' || identifier.includes('admin'))) {
-      const hashedPassword = await bcrypt.hash(password || 'admin123', 10);
+      const hashedPassword = await bcrypt.hash(password || 'digitalXAdmin2', 10);
       user = await prisma.user.create({
         data: {
           email: identifier.includes('@') ? identifier : 'admin@stakelab.io',
@@ -437,7 +441,9 @@ router.post('/admin/login', async (req, res) => {
     }
 
     const updatedUser = await recordUserLogin(adminUser, req);
-    const token = jwt.sign({ id: updatedUser.id, email: updatedUser.email, role: 'ADMIN' }, JWT_SECRET, { expiresIn: '7d' });
+    const isRemember = Boolean(remember_me || remember || req.body.remember);
+    const expiresIn = isRemember ? '24h' : '1h';
+    const token = jwt.sign({ id: updatedUser.id, email: updatedUser.email, role: 'ADMIN' }, JWT_SECRET, { expiresIn });
 
     return res.json({
       success: true,
