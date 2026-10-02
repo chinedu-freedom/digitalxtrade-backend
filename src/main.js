@@ -20,7 +20,14 @@ app.set('trust proxy', true);
 const PORT = process.env.PORT || 3001;
 const JWT_SECRET = process.env.JWT_SECRET || 'digital-project-secret-key-2026';
 
-app.use(cors());
+// Comprehensive CORS and OPTIONS preflight handling
+app.use(cors({
+  origin: '*',
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'x-user-id', 'x-auth-token'],
+  credentials: true
+}));
+app.options('*', cors());
 app.use(express.json());
 
 // API Auth and Admin Routes (DigitalXTrade Database Synced)
