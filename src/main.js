@@ -12,6 +12,7 @@ import {
   depositPlans,
   companyDepositWallets
 } from './lib/store.js';
+import { ensureDatabaseBootstrapped } from './lib/bootstrap.js';
 
 dotenv.config();
 
@@ -1297,8 +1298,10 @@ app.all(['/api/cron/run', '/api/cron/run-yields', '/api/admin/cron/run'], async 
   }
 });
 
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log(`[digital-backend] Server running on http://localhost:${PORT}`);
+  // Bootstrap database tables and seed initial records if empty
+  await ensureDatabaseBootstrapped();
   // Initialize Automated Investment Yield & Profit Engine (every 60s)
   initCron();
 });

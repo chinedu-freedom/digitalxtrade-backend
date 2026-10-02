@@ -243,7 +243,10 @@ router.post('/register', async (req, res) => {
     });
   } catch (error) {
     console.error('Register error:', error);
-    return res.status(500).json({ success: false, message: 'Server error during registration' });
+    return res.status(500).json({ 
+      success: false, 
+      message: error.message || 'Server error during registration' 
+    });
   }
 });
 
