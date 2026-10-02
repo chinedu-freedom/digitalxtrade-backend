@@ -694,19 +694,18 @@ app.post(['/api/deposit', '/api/deposits'], async (req, res) => {
         updateData[currencyBalanceField] = { decrement: numAmount };
       }
 
-      // Decrement profitBalance or depositBalance accordingly
-      const requestedWallet = (req.body.walletType || req.body.wallet_type || '').toLowerCase();
-      const userProfit = parseFloat(user.profitBalance || user.profit_balance || 0);
+      // Primary deduction from Deposit Balance (Capital Wallet). Fallback to Profit Balance if insufficient.
       const userDeposit = parseFloat(user.depositBalance || user.deposit_balance || 0);
+      const userProfit = parseFloat(user.profitBalance || user.profit_balance || 0);
 
-      if (requestedWallet === 'profit' && userProfit >= numAmount) {
-        updateData.profitBalance = { decrement: numAmount };
-      } else if (requestedWallet === 'deposit' && userDeposit >= numAmount) {
-        updateData.depositBalance = { decrement: numAmount };
-      } else if (userProfit >= numAmount) {
-        updateData.profitBalance = { decrement: numAmount };
-      } else if (userDeposit >= numAmount) {
-        updateData.depositBalance = { decrement: numAmount };
+      const depositDeduct = Math.min(userDeposit, numAmount);
+      const profitDeduct = numAmount - depositDeduct;
+
+      if (depositDeduct > 0) {
+        updateData.depositBalance = { decrement: depositDeduct };
+      }
+      if (profitDeduct > 0) {
+        updateData.profitBalance = { decrement: profitDeduct };
       }
 
       const updatedUser = await prisma.user.update({

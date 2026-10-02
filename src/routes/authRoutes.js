@@ -1,3 +1,34 @@
+
+// GET /api/public/upline-info or /api/auth/upline-info
+router.get(['/public/upline-info', '/upline-info'], async (req, res) => {
+  try {
+    const code = req.query.code || req.query.ref || req.query.referral;
+    if (!code) return res.json({ success: false, message: 'No code provided' });
+    const cleanRef = String(code).trim();
+    const referrerUser = await prisma.user.findFirst({
+      where: {
+        OR: [
+          { username: { equals: cleanRef, mode: 'insensitive' } },
+          { referralCode: { equals: cleanRef, mode: 'insensitive' } },
+          { email: { equals: cleanRef, mode: 'insensitive' } },
+          { id: cleanRef }
+        ]
+      },
+      select: { id: true, username: true, fullName: true }
+    });
+    if (referrerUser) {
+      return res.json({
+        success: true,
+        fullName: referrerUser.fullName || referrerUser.username,
+        username: referrerUser.username,
+        id: referrerUser.id
+      });
+    }
+    return res.json({ success: false, message: 'Referrer not found' });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: 'Server error fetching upline' });
+  }
+});
 import express from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
@@ -166,7 +197,7 @@ router.post('/register', async (req, res) => {
         fullName: full_name || cleanUsername,
         password: hashedPassword,
         secretQuestion: secret_question || null,
-        secretAnswer: secret_answer ? await bcrypt.hash(secret_answer, 10) : null,
+        secretAnswer: secret_answer ? String(secret_answer).trim() : null,
         referralCode: referral_code || null,
         role: 'USER',
         isEmailVerified: true,
