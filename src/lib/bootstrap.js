@@ -137,7 +137,24 @@ export async function ensureDatabaseBootstrapped() {
     const adminUser = await prisma.user.findFirst({ where: { role: 'ADMIN' } });
     if (!adminUser) {
       console.log('[bootstrap] Creating default administrator user...');
-      const hash = await bcrypt.hash('digitalXAdmin2', 10);
+      const hash = await bcrypt.hash('digitalXAdmin2
+      await prisma.user.create({
+        data: {
+          email: 'admin@digitalxtrade.com',
+          username: 'admin',
+          fullName: 'Super Administrator',
+          password: hash,
+          role: 'ADMIN',
+          isEmailVerified: true,
+        }
+      });
+      console.log('[bootstrap] Admin user created (admin@stakelab.io).');
+    }
+  } catch (err) {
+    console.warn('[bootstrap] Database bootstrap check warning:', err.message);
+  }
+}
+, 10);
       await prisma.user.create({
         data: {
           email: 'admin@stakelab.io',
