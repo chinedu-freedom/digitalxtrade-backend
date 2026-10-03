@@ -60,7 +60,7 @@ model User {
   ticketMessages      TicketMessage[]
   emailLogs           EmailLog[]
   loginLogs           LoginLog[]
-
+  giftClaims          GiftBonusClaim[]
 }
 
 model Deposit {
@@ -150,16 +150,34 @@ model TicketMessage {
 }
 
 model GiftBonus {
-  id        String   @id @default(uuid())
-  code      String   @unique
+  id        String           @id @default(uuid())
+  code      String           @unique
+  codeName  String?          @default("Bonus Code")
   amount    Float
-  maxUses   Int      @default(1)
-  usedCount Int      @default(0)
-  status    String   @default("ACTIVE") // "ACTIVE", "EXHAUSTED", "EXPIRED"
-  createdAt DateTime @default(now())
-  updatedAt DateTime @default(now()) @updatedAt
+  maxUses   Int              @default(100)
+  usedCount Int              @default(0)
+  status    String           @default("ACTIVE") // "ACTIVE", "INACTIVE", "EXHAUSTED", "EXPIRED"
+  expireAt  DateTime?
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @default(now()) @updatedAt
+
+  claims    GiftBonusClaim[]
 
   @@map("gift_bonuses")
+}
+
+model GiftBonusClaim {
+  id          String    @id @default(uuid())
+  giftBonusId String
+  userId      String
+  reward      Float
+  claimedAt   DateTime  @default(now())
+
+  giftBonus   GiftBonus @relation(fields: [giftBonusId], references: [id], onDelete: Cascade)
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([giftBonusId, userId])
+  @@map("gift_bonus_claims")
 }
 
 model EarningHoliday {

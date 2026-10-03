@@ -1372,19 +1372,62 @@ router.post('/admin/ticket/reply/:id', async (req, res) => {
   }
 });
 
+// Helper to extract authenticated user for gift claim actions
+const extractAuthUser = async (req) => {
+  const authHeader = req.headers.authorization;
+  let userId = req.headers['x-user-id'] || req.query.userId || req.body?.userId;
+
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    try {
+      const token = authHeader.split(' ')[1];
+      const decoded = jwt.verify(token, JWT_SECRET);
+      if (decoded && decoded.id) {
+        userId = decoded.id;
+      }
+    } catch (e) {}
+  }
+
+  if (userId) {
+    try {
+      const user = await prisma.user.findUnique({
+        where: { id: userId }
+      });
+      if (user) return user;
+    } catch (err) {}
+  }
+
+  return null;
+};
+
 // GET /api/admin/gift-codes & /api/admin/extra/gift-bonus
 router.get(['/admin/gift-codes', '/admin/extra/gift-bonus'], async (req, res) => {
   try {
     const giftCodes = await prisma.giftBonus.findMany({
+      include: { claims: true },
       orderBy: { createdAt: 'desc' }
     });
+
+    const formatted = giftCodes.map((c) => ({
+      id: c.id,
+      code_name: c.codeName || 'Bonus Code',
+      code: c.code,
+      amount: parseFloat(c.amount),
+      max_uses: c.maxUses,
+      used_count: c.usedCount || (c.claims ? c.claims.length : 0),
+      status: c.status || 'ACTIVE',
+      expire_at: c.expireAt ? c.expireAt.toISOString().split('T')[0] : '2026-12-31',
+      created_at: c.createdAt,
+      createdAt: c.createdAt,
+    }));
+
     return res.json({
       success: true,
-      codes: giftCodes,
-      giftCodes,
-      data: giftCodes
+      codes: formatted,
+      giftCodes: formatted,
+      data: formatted
     });
   } catch (err) {
+    console.error('Failed to fetch gift codes:', err);
     return res.status(500).json({ success: false, message: 'Failed to fetch gift codes' });
   }
 });
@@ -1392,42 +1435,255 @@ router.get(['/admin/gift-codes', '/admin/extra/gift-bonus'], async (req, res) =>
 // POST /api/admin/gift-codes & /api/admin/extra/gift-bonus
 router.post(['/admin/gift-codes', '/admin/extra/gift-bonus'], async (req, res) => {
   try {
-    const { code, amount, max_uses, maxUses, maxClaims } = req.body;
+    const { code, amount, max_uses, maxUses, maxClaims, expire_at, code_name } = req.body;
     const numAmt = parseFloat(amount || 0);
 
     if (!code || isNaN(numAmt) || numAmt <= 0) {
       return res.status(400).json({ success: false, message: 'Please provide valid code and amount' });
     }
 
+    const cleanCode = code.trim().toUpperCase();
+    const expiryDate = expire_at ? new Date(expire_at) : new Date(Date.now() + 365 * 24 * 60 * 60 * 1000);
+
     const newGift = await prisma.giftBonus.create({
       data: {
-        code: code.trim().toUpperCase(),
+        code: cleanCode,
+        codeName: code_name || 'Bonus Code',
         amount: numAmt,
-        maxUses: parseInt(max_uses || maxUses || maxClaims || 1),
+        maxUses: parseInt(max_uses || maxUses || maxClaims || 100),
         usedCount: 0,
-        status: 'ACTIVE'
+        status: 'ACTIVE',
+        expireAt: expiryDate
       }
+    });
+
+    const formatted = {
+      id: newGift.id,
+      code_name: newGift.codeName || 'Bonus Code',
+      code: newGift.code,
+      amount: parseFloat(newGift.amount),
+      max_uses: newGift.maxUses,
+      used_count: 0,
+      status: 'ACTIVE',
+      expire_at: newGift.expireAt ? newGift.expireAt.toISOString().split('T')[0] : '2026-12-31',
+      created_at: newGift.createdAt
+    };
+
+    return res.json({
+      success: true,
+      message: 'Gift code created successfully!',
+      gift: formatted,
+      code: formatted
+    });
+  } catch (err) {
+    console.error('Create gift code error:', err);
+    return res.status(500).json({ success: false, message: 'Failed to create gift bonus code', error: err.message });
+  }
+});
+
+// PUT /api/admin/gift-codes/:id & POST /api/admin/gift-codes/:id/update
+const handleUpdateGiftCode = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { amount, max_uses, maxUses, status, expire_at, code_name } = req.body;
+
+    const dataToUpdate = {};
+    if (amount !== undefined) dataToUpdate.amount = parseFloat(amount);
+    if (max_uses !== undefined || maxUses !== undefined) dataToUpdate.maxUses = parseInt(max_uses || maxUses);
+    if (status !== undefined) dataToUpdate.status = status;
+    if (expire_at !== undefined) dataToUpdate.expireAt = new Date(expire_at);
+    if (code_name !== undefined) dataToUpdate.codeName = code_name;
+
+    const updated = await prisma.giftBonus.update({
+      where: { id },
+      data: dataToUpdate
     });
 
     return res.json({
       success: true,
-      message: 'Gift code created successfully',
-      gift: newGift,
-      code: newGift
+      message: 'Gift code updated successfully!',
+      code: updated
     });
   } catch (err) {
-    return res.status(500).json({ success: false, message: 'Failed to create gift bonus' });
+    return res.status(500).json({ success: false, message: 'Failed to update gift code', error: err.message });
   }
-});
+};
+router.put('/admin/gift-codes/:id', handleUpdateGiftCode);
+router.post('/admin/gift-codes/:id/update', handleUpdateGiftCode);
 
-// DELETE /api/admin/gift-codes/:id & /api/admin/extra/gift-bonus/:id
-router.post(['/admin/gift-codes/:id/delete', '/admin/extra/gift-bonus/:id/delete'], async (req, res) => {
+// DELETE /api/admin/gift-codes/:id & POST /api/admin/gift-codes/:id/delete
+const handleDeleteGiftCode = async (req, res) => {
   try {
     const { id } = req.params;
     await prisma.giftBonus.delete({ where: { id } });
-    return res.json({ success: true, message: 'Gift code deleted successfully' });
+    return res.json({ success: true, message: 'Gift code deleted successfully!' });
   } catch (err) {
     return res.status(500).json({ success: false, message: 'Failed to delete gift code' });
+  }
+};
+router.delete('/admin/gift-codes/:id', handleDeleteGiftCode);
+router.post(['/admin/gift-codes/:id/delete', '/admin/extra/gift-bonus/:id/delete'], handleDeleteGiftCode);
+
+// GET /api/admin/gift-code-claims (Usage History Table for Admin)
+router.get('/admin/gift-code-claims', async (req, res) => {
+  try {
+    const claims = await prisma.giftBonusClaim.findMany({
+      include: { user: true, giftBonus: true },
+      orderBy: { claimedAt: 'desc' }
+    });
+
+    const formatted = claims.map((c) => ({
+      id: c.id,
+      user_id: c.userId,
+      code: c.giftBonus?.code || 'BONUS',
+      user_name: c.user?.fullName || c.user?.username || 'Valued User',
+      user_email: c.user?.email || '',
+      amount: parseFloat(c.reward),
+      claimed_at: c.claimedAt,
+      createdAt: c.claimedAt
+    }));
+
+    return res.json({ success: true, claims: formatted });
+  } catch (err) {
+    console.error('Failed to fetch gift code claims:', err);
+    return res.status(500).json({ success: false, message: 'Failed to fetch gift code claims', error: err.message });
+  }
+});
+
+// GET /api/user/gift-code-claims & /api/gift-code-claims (User's Claim History)
+router.get(['/user/gift-code-claims', '/gift-code-claims'], async (req, res) => {
+  try {
+    const authUser = await extractAuthUser(req);
+    if (!authUser) return res.json({ success: true, claims: [] });
+
+    const claims = await prisma.giftBonusClaim.findMany({
+      where: { userId: authUser.id },
+      include: { giftBonus: true },
+      orderBy: { claimedAt: 'desc' }
+    });
+
+    const formatted = claims.map((c) => ({
+      id: c.id,
+      code: c.giftBonus?.code || 'BONUS',
+      amount: parseFloat(c.reward),
+      claimed_at: c.claimedAt,
+      createdAt: c.claimedAt
+    }));
+
+    return res.json({ success: true, claims: formatted });
+  } catch (err) {
+    console.error('Failed to fetch user gift claims:', err);
+    return res.status(500).json({ success: false, message: 'Failed to fetch claims', error: err.message });
+  }
+});
+
+// POST /api/user/claim-gift-code & /api/claim-gift-code (User Claiming Bonus Code)
+router.post(['/user/claim-gift-code', '/claim-gift-code'], async (req, res) => {
+  try {
+    const authUser = await extractAuthUser(req);
+    if (!authUser) {
+      return res.status(401).json({ success: false, message: 'Please log in to claim a gift bonus.' });
+    }
+
+    const { code } = req.body;
+    if (!code || !code.trim()) {
+      return res.status(400).json({ success: false, message: 'Please enter a valid gift voucher code.' });
+    }
+
+    const cleanCode = code.trim().toUpperCase();
+    const foundCode = await prisma.giftBonus.findUnique({
+      where: { code: cleanCode },
+      include: { claims: true }
+    });
+
+    if (!foundCode) {
+      return res.status(404).json({ success: false, message: 'Invalid gift code. Please check and try again.' });
+    }
+
+    if (foundCode.status !== 'ACTIVE') {
+      return res.status(400).json({ success: false, message: 'This gift code is no longer active.' });
+    }
+
+    if (foundCode.expireAt && new Date() > new Date(foundCode.expireAt)) {
+      return res.status(400).json({ success: false, message: 'This gift code has expired.' });
+    }
+
+    if (foundCode.usedCount >= foundCode.maxUses) {
+      return res.status(400).json({ success: false, message: 'This gift code has reached its maximum usage limit.' });
+    }
+
+    // Check if this user already claimed this specific code
+    const existingClaim = await prisma.giftBonusClaim.findUnique({
+      where: {
+        giftBonusId_userId: {
+          giftBonusId: foundCode.id,
+          userId: authUser.id
+        }
+      }
+    });
+
+    if (existingClaim) {
+      return res.status(400).json({ success: false, message: 'You have already claimed this gift code.' });
+    }
+
+    const rewardAmt = parseFloat(foundCode.amount || 0);
+    const newUsedCount = foundCode.usedCount + 1;
+    const newStatus = newUsedCount >= foundCode.maxUses ? 'EXHAUSTED' : 'ACTIVE';
+
+    const oldBal = parseFloat(authUser.balance || 0);
+    const oldProfit = parseFloat(authUser.profitBalance || 0);
+    const oldEarned = parseFloat(authUser.totalEarnings || 0);
+
+    const newBal = oldBal + rewardAmt;
+    const newProfit = oldProfit + rewardAmt;
+    const newEarned = oldEarned + rewardAmt;
+
+    await prisma.$transaction([
+      prisma.giftBonusClaim.create({
+        data: {
+          giftBonusId: foundCode.id,
+          userId: authUser.id,
+          reward: rewardAmt
+        }
+      }),
+      prisma.giftBonus.update({
+        where: { id: foundCode.id },
+        data: {
+          usedCount: newUsedCount,
+          status: newStatus
+        }
+      }),
+      prisma.user.update({
+        where: { id: authUser.id },
+        data: {
+          balance: newBal,
+          profitBalance: newProfit,
+          totalEarnings: newEarned
+        }
+      }),
+      prisma.transaction.create({
+        data: {
+          userId: authUser.id,
+          type: 'BONUS',
+          amount: rewardAmt,
+          description: `Claimed Gift Bonus Code: ${foundCode.code}`,
+          status: 'COMPLETED'
+        }
+      })
+    ]);
+
+    return res.json({
+      success: true,
+      message: `Congratulations! You received $${rewardAmt.toFixed(2)} bonus!`,
+      amount: rewardAmt,
+      giftCode: {
+        code: foundCode.code,
+        amount: rewardAmt
+      }
+    });
+  } catch (err) {
+    console.error('Claim gift code error:', err);
+    return res.status(500).json({ success: false, message: 'Failed to claim gift code', error: err.message });
   }
 });
 
