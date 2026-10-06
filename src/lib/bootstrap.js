@@ -102,20 +102,43 @@ export async function ensureDatabaseBootstrapped() {
       console.log('[bootstrap] 6 investment plans created successfully.');
     }
 
-    // 2. Ensure Default Company Deposit Wallets exist
-    const walletCount = await prisma.companyWallet.count();
-    if (walletCount === 0) {
-      console.log('[bootstrap] Seeding default company deposit wallets...');
-      const wallets = [
-        { currency: 'bitcoin', name: 'Bitcoin (BTC)', network: 'BTC', address: '1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa' },
-        { currency: 'usdt_trc20', name: 'USDT (TRC20)', network: 'TRON / TRC20', address: 'TYDzsYUEpvnYmQK4WGPj2KZFmxvuh3Bekm' },
-        { currency: 'usdt_bep20', name: 'USDT (BEP20)', network: 'BNB Smart Chain (BEP20)', address: '0x71c50D95A2F3bBFE833d7F6488d5eAeaF6Ea3B3a' },
-        { currency: 'litecoin', name: 'Litecoin (LTC)', network: 'LTC', address: 'LQTp8jBovcK2qT32K3sM3o2pL4oW4v9wQe' },
-      ];
-      for (const w of wallets) {
+    // 1b. Ensure WEALTH PLAN exists
+    const wealthPlan = await prisma.investmentPlan.findFirst({
+      where: { name: { contains: 'WEALTH', mode: 'insensitive' } }
+    });
+    if (!wealthPlan) {
+      await prisma.investmentPlan.create({
+        data: {
+          name: 'WEALTH PLAN',
+          planLabel: 'Plan 4',
+          minAmount: 20000,
+          maxAmount: 0,
+          dailyProfit: 10.5,
+          profitType: 'Daily Profit (%)',
+          durationDays: 30,
+          durationHours: null,
+          paymentPeriod: 'Daily',
+          capitalReturn: true,
+          isCompounding: false,
+          status: 'Active',
+        }
+      });
+      console.log('[bootstrap] WEALTH PLAN created successfully.');
+    }
+
+    // 2. Ensure Default Company Deposit Wallets exist with latest verified addresses
+    const defaultWallets = [
+      { currency: 'bitcoin', name: 'Bitcoin (BTC)', network: 'Bitcoin Mainnet', address: 'bc1qwz6fqarhsuhgllxnqz3ekq8krdfgctkl6r5utk' },
+      { currency: 'usdt_trc20', name: 'USDT (TRC20)', network: 'Tron (TRC-20)', address: 'TQsUzgqcBhJe47Tx8fCzEi9GJJUpfpYyio' },
+      { currency: 'usdt_bep20', name: 'USDT (BEP20)', network: 'BNB Smart Chain (BEP-20)', address: '0x003848D153e45DDdd24d498B921A888a5567C9c3' },
+      { currency: 'litecoin', name: 'Litecoin (LTC)', network: 'Litecoin Mainnet', address: 'ltc1qzhnnvz4gqe7ejhkxgw4jcys28wj6ru2ce79tan' },
+    ];
+
+    for (const w of defaultWallets) {
+      const existing = await prisma.companyWallet.findUnique({ where: { currency: w.currency } });
+      if (!existing) {
         await prisma.companyWallet.create({ data: w });
       }
-      console.log('[bootstrap] Default company deposit wallets created.');
     }
 
     // 3. Ensure Security Settings exist
