@@ -278,69 +278,109 @@ export async function sendAdminNotificationEmail({ subject, title, details }) {
 }
 
 // ==========================================
-// 1. DEPOSIT EMAIL NOTIFICATIONS
+// 1. TRANSACTION EMAIL TEMPLATE (DARK + GOLD)
 // ==========================================
 
-export const sendDepositSubmittedEmail = async ({ user, deposit }) => {
-  try {
-    if (!user || !user.email) return;
-    const settings = await prisma.settings.findFirst().catch(() => null);
-    const siteName = settings?.site_name || settings?.site_title || 'DigitalXTrade';
-    const userName = user.fullName || user.username || 'Valued Trader';
-    const amountFormatted = parseFloat(deposit.amount || 0).toFixed(2);
-    const currency = deposit.currency || 'Crypto';
-    const planName = deposit.planName || 'Standard Investment Plan';
+export function renderDarkGoldTransactionEmail({
+  siteName = 'DigitalXTrade',
+  siteLogo = null,
+  title,
+  messageHtml,
+  details = [],
+  buttonText = 'Visit Your Dashboard',
+  buttonUrl,
+  resetPasswordUrl,
+  supportUrl,
+  subNoticeText = ''
+}) {
+  const detailsHtml = details
+    .map(
+      (item) => `
+        <div style="margin: 8px 0; color: #e2e8f0; font-size: 15px; line-height: 1.5;">
+          <strong style="color: #ffffff;">${item.label}:</strong> <span style="${item.style || 'color: #ffffff;'}">${item.value}</span>
+        </div>`
+    )
+    .join('');
 
-    const html = `
-      <h2 style="color: #0f172a; font-size: 20px; font-weight: 800; margin-top: 0; margin-bottom: 16px;">Deposit Request Received</h2>
-      <p style="color: #334155; font-size: 14px; line-height: 1.6; margin-bottom: 16px;">Hi <b>${userName}</b>,</p>
-      <p style="color: #334155; font-size: 14px; line-height: 1.6; margin-bottom: 20px;">Your deposit request has been received and is currently pending review & verification.</p>
-      <table width="100%" cellpadding="12" cellspacing="0" style="border-collapse: collapse; margin: 20px 0; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 13px; font-family: sans-serif;">
-        <tbody>
-          <tr style="background-color: #f8fafc; border-bottom: 1px solid #e2e8f0;">
-            <td style="font-weight: 700; color: #475569; width: 45%;">Deposit Amount</td>
-            <td style="font-weight: 800; color: #0f172a;">$${amountFormatted}</td>
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${title}</title>
+</head>
+<body style="margin:0; padding:0; background-color:#0b0d14; font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; -webkit-font-smoothing:antialiased;">
+  <table width="100%" border="0" cellspacing="0" cellpadding="0" style="background-color:#0b0d14; padding:32px 14px;">
+    <tr>
+      <td align="center">
+        <!-- Main Dark Card -->
+        <table width="100%" border="0" cellspacing="0" cellpadding="0" style="max-width:520px; background-color:#11131a; border-radius:16px; overflow:hidden; border:1px solid #1f2333; box-shadow:0 12px 36px rgba(0,0,0,0.45);">
+          <!-- Gold Banner -->
+          <tr>
+            <td align="center" style="background-color:#b58117; padding:26px 20px; text-align:center;">
+              ${siteLogo ? `<img src="${siteLogo}" alt="${siteName}" style="max-height:38px; max-width:220px; display:block; margin:0 auto 6px; object-fit:contain;" />` : ''}
+              <span style="display:inline-block; font-size:22px; font-weight:900; letter-spacing:1.5px; color:#ffffff; text-transform:uppercase; font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
+                ${siteName}
+              </span>
+            </td>
           </tr>
-          <tr style="border-bottom: 1px solid #e2e8f0;">
-            <td style="font-weight: 700; color: #475569;">Payment Method</td>
-            <td style="color: #0f172a;">${currency}</td>
-          </tr>
-          <tr style="background-color: #f8fafc; border-bottom: 1px solid #e2e8f0;">
-            <td style="font-weight: 700; color: #475569;">Investment Plan</td>
-            <td style="font-weight: 700; color: #0085d0;">${planName}</td>
-          </tr>
-          <tr style="border-bottom: 1px solid #e2e8f0;">
-            <td style="font-weight: 700; color: #475569;">Deposit Status</td>
-            <td style="font-weight: 700; color: #d97706;">Pending Review</td>
-          </tr>
-          ${deposit.walletAddress && deposit.walletAddress !== 'Account Balance' ? `
-          <tr style="background-color: #f8fafc; border-bottom: 1px solid #e2e8f0;">
-            <td style="font-weight: 700; color: #475569;">Deposit Address</td>
-            <td style="font-family: monospace; font-size: 12px; color: #334155; word-break: break-all;">${deposit.walletAddress}</td>
-          </tr>
-          ` : ''}
-          ${deposit.txHash ? `
-          <tr style="border-bottom: 1px solid #e2e8f0;">
-            <td style="font-weight: 700; color: #475569;">Transaction Hash / ID</td>
-            <td style="font-family: monospace; font-size: 12px; color: #334155; word-break: break-all;">${deposit.txHash}</td>
-          </tr>
-          ` : ''}
-        </tbody>
-      </table>
-      <p style="color: #64748b; font-size: 13px; margin-top: 20px; line-height: 1.6;">Once your blockchain transaction is confirmed, your deposit will be credited automatically to your account.</p>
-      <p style="color: #0f172a; font-weight: 700; margin-top: 20px;">Thank you for choosing ${siteName}.</p>
-    `;
+          <!-- Content Body -->
+          <tr>
+            <td style="padding:34px 28px 28px; text-align:left; color:#ffffff;">
+              <h1 style="color:#ffffff; font-size:24px; font-weight:700; margin:0 0 16px 0; line-height:1.3; font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
+                ${title}
+              </h1>
+              <p style="color:#cbd5e1; font-size:15px; line-height:1.6; margin:0 0 24px 0;">
+                ${messageHtml}
+              </p>
 
-    return await sendEmail({
-      to: user.email,
-      subject: 'Deposit Request Received',
-      html,
-      emailType: 'DEPOSIT_SUBMITTED',
-      userId: user.id,
-    });
-  } catch (err) {
-    console.error('sendDepositSubmittedEmail error:', err);
-  }
+              <!-- Transaction Specs -->
+              <div style="margin:0 0 26px 0;">
+                ${detailsHtml}
+              </div>
+
+              <!-- Action Button -->
+              <div style="margin:28px 0 24px 0; text-align:center;">
+                <a href="${buttonUrl}" target="_blank" style="display:inline-block; background-color:#b58117; color:#ffffff; font-size:15px; font-weight:700; text-decoration:none; padding:13px 34px; border-radius:8px; box-shadow:0 4px 14px rgba(181, 129, 23, 0.4); text-align:center;">
+                  ${buttonText}
+                </a>
+              </div>
+
+              <!-- Security Notice with Working Links -->
+              <p style="color:#94a3b8; font-size:13px; line-height:1.6; margin:22px 0 10px 0;">
+                If you don't recognize this activity, please <a href="${resetPasswordUrl}" target="_blank" style="color:#60a5fa; text-decoration:underline; font-weight:600;">reset your password</a> and contact <a href="${supportUrl}" target="_blank" style="color:#60a5fa; text-decoration:underline; font-weight:600;">customer support</a> immediately.
+              </p>
+
+              ${subNoticeText ? `
+              <p style="color:#64748b; font-size:12px; line-height:1.5; margin:10px 0 0 0;">
+                ${subNoticeText}
+              </p>
+              ` : ''}
+            </td>
+          </tr>
+          <!-- Footer -->
+          <tr>
+            <td style="padding:16px 24px; background-color:#0b0d13; text-align:center; border-top:1px solid #1a1e2b;">
+              <p style="margin:0; color:#64748b; font-size:12px; line-height:1.5;">
+                &copy; ${new Date().getFullYear()} ${siteName}. All rights reserved.
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+}
+
+// ==========================================
+// 2. DEPOSIT EMAIL NOTIFICATIONS
+// ==========================================
+
+export const sendDepositSubmittedEmail = async () => {
+  // Disabled as per user requirement: do not send email for pending deposits
+  return;
 };
 
 export const sendDepositApprovedEmail = async ({ user, deposit }) => {
@@ -348,48 +388,46 @@ export const sendDepositApprovedEmail = async ({ user, deposit }) => {
     if (!user || !user.email) return;
     const settings = await prisma.settings.findFirst().catch(() => null);
     const siteName = settings?.site_name || settings?.site_title || 'DigitalXTrade';
-    const userName = user.fullName || user.username || 'Valued Trader';
+    const siteLogo = settings?.site_logo || null;
+    const frontendUrl = (process.env.FRONTEND_URL || 'https://digitalxtrade.com').replace(/\/+$/, '');
+    const dashboardUrl = `${frontendUrl}/dashboard`;
+    const resetPasswordUrl = `${frontendUrl}/forgot-password`;
+    const supportUrl = `${frontendUrl}/support`;
+
     const amountFormatted = parseFloat(deposit.amount || 0).toFixed(2);
-    const currency = deposit.currency || 'Crypto';
+    const currency = deposit.currency || 'USDT-TRC20';
     const planName = deposit.planName || 'Standard Investment Plan';
 
-    const html = `
-      <h2 style="color: #0f172a; font-size: 20px; font-weight: 800; margin-top: 0; margin-bottom: 16px;">Deposit Successfully Confirmed & Credited</h2>
-      <p style="color: #334155; font-size: 14px; line-height: 1.6; margin-bottom: 16px;">Hi <b>${userName}</b>,</p>
-      <p style="color: #334155; font-size: 14px; line-height: 1.6; margin-bottom: 20px;">Your deposit of <b>$${amountFormatted}</b> via <b>${currency}</b> has been successfully verified and credited to your account.</p>
-      <table width="100%" cellpadding="12" cellspacing="0" style="border-collapse: collapse; margin: 20px 0; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 13px; font-family: sans-serif;">
-        <tbody>
-          <tr style="background-color: #f8fafc; border-bottom: 1px solid #e2e8f0;">
-            <td style="font-weight: 700; color: #475569; width: 45%;">Credited Amount</td>
-            <td style="font-weight: 800; color: #10b981;">$${amountFormatted}</td>
-          </tr>
-          <tr style="border-bottom: 1px solid #e2e8f0;">
-            <td style="font-weight: 700; color: #475569;">Payment Method</td>
-            <td style="color: #0f172a;">${currency}</td>
-          </tr>
-          <tr style="background-color: #f8fafc; border-bottom: 1px solid #e2e8f0;">
-            <td style="font-weight: 700; color: #475569;">Investment Plan</td>
-            <td style="font-weight: 700; color: #0085d0;">${planName}</td>
-          </tr>
-          ${deposit.targetWalletLabel ? `
-          <tr style="border-bottom: 1px solid #e2e8f0;">
-            <td style="font-weight: 700; color: #475569;">Credited Wallet</td>
-            <td style="font-weight: 700; color: #0085d0;">${deposit.targetWalletLabel}</td>
-          </tr>
-          ` : ''}
-          <tr style="border-bottom: 1px solid #e2e8f0;">
-            <td style="font-weight: 700; color: #475569;">Deposit Status</td>
-            <td style="font-weight: 700; color: #10b981;">Confirmed & Credited</td>
-          </tr>
-        </tbody>
-      </table>
-      <p style="color: #334155; font-size: 14px; line-height: 1.6; margin-top: 16px;">Kindly log in to your account to monitor your investment and active trade yields.</p>
-      <p style="color: #0f172a; font-weight: 700; margin-top: 20px;">Thank you for choosing ${siteName}.</p>
-    `;
+    const details = [
+      { label: 'Deposit Amount', value: amountFormatted },
+      { label: 'Deposit Currency', value: currency },
+      { label: 'Deposit Plan', value: planName },
+    ];
+
+    if (deposit.targetWalletLabel) {
+      details.push({
+        label: 'Credited Wallet',
+        value: deposit.targetWalletLabel,
+        style: 'color: #38bdf8; font-weight: 600;'
+      });
+    }
+
+    const html = renderDarkGoldTransactionEmail({
+      siteName,
+      siteLogo,
+      title: 'Deposit Activated',
+      messageHtml: `You've successfully deposited <strong style="color: #ffffff;">${amountFormatted} ${currency}</strong> into your account.`,
+      details,
+      buttonText: 'Visit Your Dashboard',
+      buttonUrl: dashboardUrl,
+      resetPasswordUrl,
+      supportUrl,
+      subNoticeText: 'Deposits are usually confirmed within minutes. Please check your dashboard for real-time status.'
+    });
 
     return await sendEmail({
       to: user.email,
-      subject: 'Deposit Successfully Confirmed & Credited',
+      subject: 'Deposit Successful',
       html,
       emailType: 'DEPOSIT_APPROVED',
       userId: user.id,
@@ -404,41 +442,38 @@ export const sendDepositRejectedEmail = async ({ user, deposit, reason }) => {
     if (!user || !user.email) return;
     const settings = await prisma.settings.findFirst().catch(() => null);
     const siteName = settings?.site_name || settings?.site_title || 'DigitalXTrade';
-    const userName = user.fullName || user.username || 'Valued Trader';
-    const amountFormatted = parseFloat(deposit.amount || 0).toFixed(2);
-    const currency = deposit.currency || 'Crypto';
+    const siteLogo = settings?.site_logo || null;
+    const frontendUrl = (process.env.FRONTEND_URL || 'https://digitalxtrade.com').replace(/\/+$/, '');
+    const dashboardUrl = `${frontendUrl}/dashboard`;
+    const resetPasswordUrl = `${frontendUrl}/forgot-password`;
+    const supportUrl = `${frontendUrl}/support`;
 
-    const html = `
-      <h2 style="color: #0f172a; font-size: 20px; font-weight: 800; margin-top: 0; margin-bottom: 16px;">Deposit Request Rejected</h2>
-      <p style="color: #334155; font-size: 14px; line-height: 1.6; margin-bottom: 16px;">Hi <b>${userName}</b>,</p>
-      <p style="color: #334155; font-size: 14px; line-height: 1.6; margin-bottom: 20px;">Your deposit request could not be processed at this time.</p>
-      <table width="100%" cellpadding="12" cellspacing="0" style="border-collapse: collapse; margin: 20px 0; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 13px; font-family: sans-serif;">
-        <tbody>
-          <tr style="background-color: #f8fafc; border-bottom: 1px solid #e2e8f0;">
-            <td style="font-weight: 700; color: #475569; width: 45%;">Amount</td>
-            <td style="font-weight: 800; color: #0f172a;">$${amountFormatted}</td>
-          </tr>
-          <tr style="border-bottom: 1px solid #e2e8f0;">
-            <td style="font-weight: 700; color: #475569;">Payment Method</td>
-            <td style="color: #0f172a;">${currency}</td>
-          </tr>
-          <tr style="background-color: #f8fafc; border-bottom: 1px solid #e2e8f0;">
-            <td style="font-weight: 700; color: #475569;">Status</td>
-            <td style="font-weight: 700; color: #ef4444;">Rejected</td>
-          </tr>
-          <tr style="border-bottom: 1px solid #e2e8f0;">
-            <td style="font-weight: 700; color: #475569;">Reason</td>
-            <td style="color: #64748b;">${reason || 'Deposit verification failed or unconfirmed transaction hash'}</td>
-          </tr>
-        </tbody>
-      </table>
-      <p style="color: #64748b; font-size: 13px; margin-top: 20px; line-height: 1.6;">If you have already sent funds on-chain, please contact our support team with your transaction details.</p>
-      <p style="color: #0f172a; font-weight: 700; margin-top: 20px;">Thank you for choosing ${siteName}.</p>
-    `;
+    const amountFormatted = parseFloat(deposit.amount || 0).toFixed(2);
+    const currency = deposit.currency || 'USDT';
+
+    const details = [
+      { label: 'Deposit Amount', value: amountFormatted },
+      { label: 'Deposit Currency', value: currency },
+      { label: 'Deposit Status', value: 'Rejected', style: 'color: #f87171; font-weight: 700;' },
+      { label: 'Reason', value: reason || 'Deposit verification failed or unconfirmed blockchain transaction', style: 'color: #94a3b8;' }
+    ];
+
+    const html = renderDarkGoldTransactionEmail({
+      siteName,
+      siteLogo,
+      title: 'Deposit Request Declined',
+      messageHtml: 'Your deposit request could not be completed and has been declined.',
+      details,
+      buttonText: 'Visit Your Dashboard',
+      buttonUrl: dashboardUrl,
+      resetPasswordUrl,
+      supportUrl,
+      subNoticeText: 'If you have already sent funds on-chain, please contact customer support immediately with your transaction hash.'
+    });
 
     return await sendEmail({
       to: user.email,
-      subject: 'Deposit Request Rejected',
+      subject: 'Deposit Request Declined',
       html,
       emailType: 'DEPOSIT_REJECTED',
       userId: user.id,
@@ -449,68 +484,12 @@ export const sendDepositRejectedEmail = async ({ user, deposit, reason }) => {
 };
 
 // ==========================================
-// 2. WITHDRAWAL EMAIL NOTIFICATIONS
+// 3. WITHDRAWAL EMAIL NOTIFICATIONS
 // ==========================================
 
-export const sendWithdrawalSubmittedEmail = async ({ user, withdrawal }) => {
-  try {
-    if (!user || !user.email) return;
-    const settings = await prisma.settings.findFirst().catch(() => null);
-    const siteName = settings?.site_name || settings?.site_title || 'DigitalXTrade';
-    const userName = user.fullName || user.username || 'Valued Trader';
-    const amountFormatted = parseFloat(withdrawal.amount || 0).toFixed(2);
-    const feeFormatted = parseFloat(withdrawal.charge || 0).toFixed(2);
-    const netFormatted = parseFloat(withdrawal.netAmount || withdrawal.amount || 0).toFixed(2);
-    const currency = withdrawal.currency || 'Crypto';
-
-    const html = `
-      <h2 style="color: #0f172a; font-size: 20px; font-weight: 800; margin-top: 0; margin-bottom: 16px;">Withdrawal Request Received</h2>
-      <p style="color: #334155; font-size: 14px; line-height: 1.6; margin-bottom: 16px;">Hi <b>${userName}</b>,</p>
-      <p style="color: #334155; font-size: 14px; line-height: 1.6; margin-bottom: 20px;">Your withdrawal request has been received and is currently pending review & processing.</p>
-      <table width="100%" cellpadding="12" cellspacing="0" style="border-collapse: collapse; margin: 20px 0; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 13px; font-family: sans-serif;">
-        <tbody>
-          <tr style="background-color: #f8fafc; border-bottom: 1px solid #e2e8f0;">
-            <td style="font-weight: 700; color: #475569; width: 45%;">Withdrawal Amount</td>
-            <td style="font-weight: 800; color: #0f172a;">$${amountFormatted}</td>
-          </tr>
-          ${parseFloat(feeFormatted) > 0 ? `
-          <tr style="border-bottom: 1px solid #e2e8f0;">
-            <td style="font-weight: 700; color: #475569;">Withdrawal Fee</td>
-            <td style="font-weight: 700; color: #ef4444;">-$${feeFormatted}</td>
-          </tr>
-          <tr style="background-color: #f8fafc; border-bottom: 1px solid #e2e8f0;">
-            <td style="font-weight: 700; color: #475569;">Net Payout Amount</td>
-            <td style="font-weight: 800; color: #0085d0;">$${netFormatted}</td>
-          </tr>
-          ` : ''}
-          <tr style="border-bottom: 1px solid #e2e8f0;">
-            <td style="font-weight: 700; color: #475569;">Payout Method</td>
-            <td style="color: #0f172a;">${currency}</td>
-          </tr>
-          <tr style="background-color: #f8fafc; border-bottom: 1px solid #e2e8f0;">
-            <td style="font-weight: 700; color: #475569;">Destination Address</td>
-            <td style="font-family: monospace; font-size: 12px; color: #334155; word-break: break-all;">${withdrawal.walletAddress || 'N/A'}</td>
-          </tr>
-          <tr style="border-bottom: 1px solid #e2e8f0;">
-            <td style="font-weight: 700; color: #475569;">Withdrawal Status</td>
-            <td style="font-weight: 700; color: #d97706;">Pending Review</td>
-          </tr>
-        </tbody>
-      </table>
-      <p style="color: #64748b; font-size: 13px; margin-top: 20px; line-height: 1.6;">If you did not initiate this withdrawal, please lock your account and contact our support team immediately.</p>
-      <p style="color: #0f172a; font-weight: 700; margin-top: 20px;">Thank you for choosing ${siteName}.</p>
-    `;
-
-    return await sendEmail({
-      to: user.email,
-      subject: 'Withdrawal Request Received',
-      html,
-      emailType: 'WITHDRAWAL_PROCESSING',
-      userId: user.id,
-    });
-  } catch (err) {
-    console.error('sendWithdrawalSubmittedEmail error:', err);
-  }
+export const sendWithdrawalSubmittedEmail = async () => {
+  // Disabled as per user requirement: do not send email for pending withdrawals
+  return;
 };
 
 export const sendWithdrawalApprovedEmail = async ({ user, withdrawal }) => {
@@ -518,40 +497,44 @@ export const sendWithdrawalApprovedEmail = async ({ user, withdrawal }) => {
     if (!user || !user.email) return;
     const settings = await prisma.settings.findFirst().catch(() => null);
     const siteName = settings?.site_name || settings?.site_title || 'DigitalXTrade';
-    const userName = user.fullName || user.username || 'Valued Trader';
-    const amountFormatted = parseFloat(withdrawal.netAmount || withdrawal.amount || 0).toFixed(2);
-    const currency = withdrawal.currency || 'Crypto';
+    const siteLogo = settings?.site_logo || null;
+    const frontendUrl = (process.env.FRONTEND_URL || 'https://digitalxtrade.com').replace(/\/+$/, '');
+    const dashboardUrl = `${frontendUrl}/dashboard`;
+    const resetPasswordUrl = `${frontendUrl}/forgot-password`;
+    const supportUrl = `${frontendUrl}/support`;
 
-    const html = `
-      <h2 style="color: #0f172a; font-size: 20px; font-weight: 800; margin-top: 0; margin-bottom: 16px;">Withdrawal Successfully Processed</h2>
-      <p style="color: #334155; font-size: 14px; line-height: 1.6; margin-bottom: 16px;">Hi <b>${userName}</b>,</p>
-      <p style="color: #334155; font-size: 14px; line-height: 1.6; margin-bottom: 20px;">Your withdrawal request has been successfully processed and disbursed.</p>
-      <table width="100%" cellpadding="12" cellspacing="0" style="border-collapse: collapse; margin: 20px 0; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 13px; font-family: sans-serif;">
-        <tbody>
-          <tr style="background-color: #f8fafc; border-bottom: 1px solid #e2e8f0;">
-            <td style="font-weight: 700; color: #475569; width: 45%;">Disbursed Amount</td>
-            <td style="font-weight: 800; color: #10b981;">$${amountFormatted}</td>
-          </tr>
-          <tr style="border-bottom: 1px solid #e2e8f0;">
-            <td style="font-weight: 700; color: #475569;">Withdrawal Status</td>
-            <td style="font-weight: 700; color: #10b981;">Completed</td>
-          </tr>
-          <tr style="background-color: #f8fafc; border-bottom: 1px solid #e2e8f0;">
-            <td style="font-weight: 700; color: #475569;">Payout Method</td>
-            <td style="color: #0f172a;">${currency}</td>
-          </tr>
-          <tr style="border-bottom: 1px solid #e2e8f0;">
-            <td style="font-weight: 700; color: #475569;">Destination Address</td>
-            <td style="font-family: monospace; font-size: 12px; color: #334155; word-break: break-all;">${withdrawal.walletAddress || 'N/A'}</td>
-          </tr>
-        </tbody>
-      </table>
-      <p style="color: #0f172a; font-weight: 700; margin-top: 20px;">Thank you for choosing ${siteName}.</p>
-    `;
+    const amountFormatted = parseFloat(withdrawal.netAmount || withdrawal.amount || 0).toFixed(2);
+    const currency = withdrawal.currency || 'USDT-TRC20';
+
+    const details = [
+      { label: 'Withdrawal Amount', value: amountFormatted },
+      { label: 'Withdrawal Currency', value: currency },
+    ];
+
+    if (withdrawal.walletAddress) {
+      details.push({
+        label: 'Destination Address',
+        value: withdrawal.walletAddress,
+        style: 'color: #e2e8f0; font-family: monospace; font-size: 13px; word-break: break-all;'
+      });
+    }
+
+    const html = renderDarkGoldTransactionEmail({
+      siteName,
+      siteLogo,
+      title: 'Withdrawal Successful',
+      messageHtml: `You've successfully withdrawn <strong style="color: #ffffff;">${amountFormatted} ${currency}</strong> from your account.`,
+      details,
+      buttonText: 'Visit Your Dashboard',
+      buttonUrl: dashboardUrl,
+      resetPasswordUrl,
+      supportUrl,
+      subNoticeText: 'Withdrawals are processed promptly. Please check your external wallet or blockchain explorer for confirmation.'
+    });
 
     return await sendEmail({
       to: user.email,
-      subject: 'Withdrawal Successfully Processed',
+      subject: 'Withdrawal Successful',
       html,
       emailType: 'WITHDRAWAL_APPROVED',
       userId: user.id,
@@ -566,36 +549,38 @@ export const sendWithdrawalRejectedEmail = async ({ user, withdrawal, reason }) 
     if (!user || !user.email) return;
     const settings = await prisma.settings.findFirst().catch(() => null);
     const siteName = settings?.site_name || settings?.site_title || 'DigitalXTrade';
-    const userName = user.fullName || user.username || 'Valued Trader';
-    const amountFormatted = parseFloat(withdrawal.amount || 0).toFixed(2);
+    const siteLogo = settings?.site_logo || null;
+    const frontendUrl = (process.env.FRONTEND_URL || 'https://digitalxtrade.com').replace(/\/+$/, '');
+    const dashboardUrl = `${frontendUrl}/dashboard`;
+    const resetPasswordUrl = `${frontendUrl}/forgot-password`;
+    const supportUrl = `${frontendUrl}/support`;
 
-    const html = `
-      <h2 style="color: #0f172a; font-size: 20px; font-weight: 800; margin-top: 0; margin-bottom: 16px;">Withdrawal Request Rejected</h2>
-      <p style="color: #334155; font-size: 14px; line-height: 1.6; margin-bottom: 16px;">Hi <b>${userName}</b>,</p>
-      <p style="color: #334155; font-size: 14px; line-height: 1.6; margin-bottom: 20px;">Your withdrawal request could not be completed and the amount has been refunded to your account balance.</p>
-      <table width="100%" cellpadding="12" cellspacing="0" style="border-collapse: collapse; margin: 20px 0; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 13px; font-family: sans-serif;">
-        <tbody>
-          <tr style="background-color: #f8fafc; border-bottom: 1px solid #e2e8f0;">
-            <td style="font-weight: 700; color: #475569; width: 45%;">Refunded Amount</td>
-            <td style="font-weight: 800; color: #0f172a;">$${amountFormatted}</td>
-          </tr>
-          <tr style="border-bottom: 1px solid #e2e8f0;">
-            <td style="font-weight: 700; color: #475569;">Withdrawal Status</td>
-            <td style="font-weight: 700; color: #ef4444;">Rejected & Refunded</td>
-          </tr>
-          <tr style="background-color: #f8fafc; border-bottom: 1px solid #e2e8f0;">
-            <td style="font-weight: 700; color: #475569;">Reason</td>
-            <td style="color: #64748b;">${reason || 'Security review check or destination address verification'}</td>
-          </tr>
-        </tbody>
-      </table>
-      <p style="color: #64748b; font-size: 13px; margin-top: 20px; line-height: 1.6;">If you have questions regarding this decision, please reach out to our support team.</p>
-      <p style="color: #0f172a; font-weight: 700; margin-top: 20px;">Thank you for choosing ${siteName}.</p>
-    `;
+    const amountFormatted = parseFloat(withdrawal.amount || 0).toFixed(2);
+    const currency = withdrawal.currency || 'USDT';
+
+    const details = [
+      { label: 'Refunded Amount', value: amountFormatted },
+      { label: 'Withdrawal Currency', value: currency },
+      { label: 'Withdrawal Status', value: 'Rejected & Refunded', style: 'color: #f87171; font-weight: 700;' },
+      { label: 'Reason', value: reason || 'Destination address verification or security check', style: 'color: #94a3b8;' }
+    ];
+
+    const html = renderDarkGoldTransactionEmail({
+      siteName,
+      siteLogo,
+      title: 'Withdrawal Request Declined',
+      messageHtml: 'Your withdrawal request could not be processed and your funds have been refunded to your account balance.',
+      details,
+      buttonText: 'Visit Your Dashboard',
+      buttonUrl: dashboardUrl,
+      resetPasswordUrl,
+      supportUrl,
+      subNoticeText: 'If you believe this was in error, please review your withdrawal wallet details and contact customer support.'
+    });
 
     return await sendEmail({
       to: user.email,
-      subject: 'Withdrawal Request Rejected',
+      subject: 'Withdrawal Request Declined',
       html,
       emailType: 'WITHDRAWAL_REJECTED',
       userId: user.id,
@@ -670,22 +655,22 @@ export const sendReferralCommissionEmail = async ({ inviter, referee, commission
 
 export const sendDepositEmail = async ({ user, deposit, action }) => {
   const status = (deposit?.status || action || 'PENDING').toUpperCase();
-  if (status === 'APPROVED') {
+  if (['APPROVED', 'COMPLETED', 'CONFIRMED'].includes(status)) {
     return sendDepositApprovedEmail({ user, deposit });
-  } else if (status === 'REJECTED') {
-    return sendDepositRejectedEmail({ user, deposit, reason: deposit.adminNote });
-  } else {
-    return sendDepositSubmittedEmail({ user, deposit });
+  } else if (['REJECTED', 'DECLINED'].includes(status)) {
+    return sendDepositRejectedEmail({ user, deposit, reason: deposit?.adminNote });
   }
+  // Pending deposit: Do not send email as requested
+  return;
 };
 
 export const sendWithdrawalEmail = async ({ user, withdrawal, action }) => {
   const status = (withdrawal?.status || action || 'PENDING').toUpperCase();
-  if (status === 'APPROVED') {
+  if (['APPROVED', 'COMPLETED', 'CONFIRMED'].includes(status)) {
     return sendWithdrawalApprovedEmail({ user, withdrawal });
-  } else if (status === 'REJECTED') {
-    return sendWithdrawalRejectedEmail({ user, withdrawal, reason: withdrawal.adminNote });
-  } else {
-    return sendWithdrawalSubmittedEmail({ user, withdrawal });
+  } else if (['REJECTED', 'DECLINED'].includes(status)) {
+    return sendWithdrawalRejectedEmail({ user, withdrawal, reason: withdrawal?.adminNote });
   }
+  // Pending withdrawal: Do not send email as requested
+  return;
 };

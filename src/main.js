@@ -34,8 +34,10 @@ app.use(express.json());
 
 // API Auth and Admin Routes (DigitalXTrade Database Synced)
 app.use('/api/auth', authRoutes);
+app.use('/auth', authRoutes);
 app.use('/api', authRoutes);
 app.use('/api', adminRoutes);
+app.use('/admin', adminRoutes);
 
 // Health Check Endpoint
 app.get('/api/health', (req, res) => {
@@ -490,12 +492,6 @@ app.post('/api/withdraw', async (req, res) => {
       }
     });
 
-    // Send email notification to user asynchronously
-    sendWithdrawalEmail({
-      user,
-      withdrawal,
-      action: 'PENDING'
-    }).catch(e => console.error('Error sending withdrawal notification email:', e));
 
     const successMsg = chosenWallet === 'deposit'
       ? `Withdrawal request for ${numAmount.toFixed(2)} submitted! 50% capital withdrawal fee applied (Fee: ${charge.toFixed(2)}, Net Payout: ${netAmount.toFixed(2)}).`
@@ -834,12 +830,6 @@ app.post(['/api/deposit', '/api/deposits'], async (req, res) => {
             }
           });
 
-          // Send deposit email notification asynchronously
-          sendDepositEmail({
-            user,
-            deposit: depositOrder,
-            action: 'PENDING'
-          }).catch(e => console.error('Error sending auto deposit email:', e));
 
           return res.json({
             success: true,
@@ -889,12 +879,6 @@ app.post(['/api/deposit', '/api/deposits'], async (req, res) => {
       }
     });
 
-    // Send deposit email notification asynchronously
-    sendDepositEmail({
-      user,
-      deposit: depositOrder,
-      action: 'PENDING'
-    }).catch(e => console.error('Error sending manual deposit email:', e));
 
     return res.json({
       success: true,
@@ -1110,16 +1094,6 @@ app.post('/api/deposit/confirm', async (req, res) => {
       }
     });
 
-    // Send deposit pending verification email
-    prisma.user.findUnique({ where: { id: deposit.userId } }).then(depUser => {
-      if (depUser) {
-        sendDepositEmail({
-          user: depUser,
-          deposit: updated,
-          action: 'PENDING'
-        }).catch(e => console.error('Error sending deposit confirmation email:', e));
-      }
-    }).catch(() => {});
 
     return res.json({
       success: true,
