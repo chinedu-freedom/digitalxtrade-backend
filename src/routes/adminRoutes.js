@@ -2,7 +2,8 @@ import express from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import prisma from '../lib/prisma.js';
-import { depositPlans, companyDepositWallets } from '../lib/store.js';
+import { depositPlans, companyDepositWallets, getActiveCompanyWallets, DEFAULT_COMPANY_WALLETS } from '../lib/store.js';
+import { sendDepositEmail, sendWithdrawalEmail, sendReferralCommissionEmail } from '../services/emailService.js';
 
 const router = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET || 'digital-project-secret-key-2026';
@@ -851,6 +852,55 @@ router.post('/admin/deposits/:id/approve', async (req, res) => {
       }
     }
 
+    // Process 10% Referral Commission for upline inviter
+    try {
+      const inviter = deposit.user?.referredBy || (deposit.user?.referredById ? await prisma.user.findUnique({ where: { id: deposit.user.referredById } }) : null);
+      if (inviter) {
+        const commissionRate = 0.10; // 10% Level 1 Referral Bonus
+        const commissionAmount = parseFloat((deposit.amount * commissionRate).toFixed(2));
+        if (commissionAmount > 0) {
+          await prisma.user.update({
+            where: { id: inviter.id },
+            data: {
+              balance: { increment: commissionAmount },
+              referralCommissions: { increment: commissionAmount }
+            }
+          });
+
+          await prisma.transaction.create({
+            data: {
+              userId: inviter.id,
+              type: 'COMMISSION',
+              amount: commissionAmount,
+              description: `10% Referral Commission from @${deposit.user.username || deposit.user.fullName || 'referral'}'s deposit of ${deposit.amount.toFixed(2)}`,
+              status: 'COMPLETED'
+            }
+          });
+
+          // Dispatch referral commission email to the referrer
+          sendReferralCommissionEmail({
+            inviter,
+            referee: deposit.user,
+            commissionAmount,
+            depositAmount: deposit.amount,
+            level: 1,
+            percentage: 10
+          }).catch(e => console.error('Error sending referral commission email:', e));
+        }
+      }
+    } catch (refErr) {
+      console.error('Error processing referral commission on deposit approve:', refErr);
+    }
+
+    // Send email notification to user asynchronously
+    if (deposit.user) {
+      sendDepositEmail({
+        user: deposit.user,
+        deposit: updatedDeposit,
+        action: 'APPROVED'
+      }).catch(e => console.error('Error sending deposit approval email:', e));
+    }
+
     return res.json({
       success: true,
       message: 'Deposit approved successfully!',
@@ -866,7 +916,10 @@ router.post('/admin/deposits/:id/approve', async (req, res) => {
 router.post('/admin/deposits/:id/reject', async (req, res) => {
   try {
     const { id } = req.params;
-    const deposit = await prisma.deposit.findUnique({ where: { id } });
+    const deposit = await prisma.deposit.findUnique({
+      where: { id },
+      include: { user: true }
+    });
     const updated = await prisma.deposit.update({
       where: { id },
       data: { status: 'REJECTED' }
@@ -891,6 +944,15 @@ router.post('/admin/deposits/:id/reject', async (req, res) => {
             description: `Deposit rejected via ${deposit.currency} (${deposit.planName || 'Plan'})`
           }
         });
+      }
+
+      // Send email notification to user asynchronously
+      if (deposit.user) {
+        sendDepositEmail({
+          user: deposit.user,
+          deposit: updated,
+          action: 'REJECTED'
+        }).catch(e => console.error('Error sending deposit rejection email:', e));
       }
     }
 
@@ -985,7 +1047,10 @@ router.get(['/admin/withdraw/details/:id', '/admin/withdrawals/:id'], async (req
 router.post('/admin/withdrawals/:id/approve', async (req, res) => {
   try {
     const { id } = req.params;
-    const withdrawal = await prisma.withdrawal.findUnique({ where: { id } });
+    const withdrawal = await prisma.withdrawal.findUnique({
+      where: { id },
+      include: { user: true }
+    });
     if (!withdrawal) {
       return res.status(404).json({ success: false, message: 'Withdrawal not found' });
     }
@@ -1033,6 +1098,15 @@ router.post('/admin/withdrawals/:id/approve', async (req, res) => {
           }
         });
       }
+
+      // Send email notification to user asynchronously
+      if (withdrawal.user) {
+        sendWithdrawalEmail({
+          user: withdrawal.user,
+          withdrawal: updated,
+          action: 'APPROVED'
+        }).catch(e => console.error('Error sending withdrawal approval email:', e));
+      }
     }
 
     return res.json({
@@ -1049,7 +1123,10 @@ router.post('/admin/withdrawals/:id/approve', async (req, res) => {
 router.post('/admin/withdrawals/:id/reject', async (req, res) => {
   try {
     const { id } = req.params;
-    const withdrawal = await prisma.withdrawal.findUnique({ where: { id } });
+    const withdrawal = await prisma.withdrawal.findUnique({
+      where: { id },
+      include: { user: true }
+    });
     if (!withdrawal) {
       return res.status(404).json({ success: false, message: 'Withdrawal not found' });
     }
@@ -1102,6 +1179,15 @@ router.post('/admin/withdrawals/:id/reject', async (req, res) => {
             status: 'COMPLETED'
           }
         });
+      }
+
+      // Send email notification to user asynchronously
+      if (withdrawal.user) {
+        sendWithdrawalEmail({
+          user: withdrawal.user,
+          withdrawal: updated,
+          action: 'REJECTED'
+        }).catch(e => console.error('Error sending withdrawal rejection email:', e));
       }
     }
 
@@ -2581,6 +2667,117 @@ router.post('/admin/deposit-withdrawal-settings', (req, res) => {
     message: 'Deposit & Withdrawal settings updated successfully!',
     settings: depositWithdrawalConfig
   });
+});
+// ==========================================
+// COMPANY DEPOSIT WALLETS (MANUAL RECEIVING ADDRESSES)
+// ==========================================
+
+// GET active company wallets with fallback metadata
+router.get(['/admin/company-wallets', '/company-wallets', '/public/company-wallets'], async (req, res) => {
+  try {
+    const activeWallets = await getActiveCompanyWallets(prisma);
+    return res.json({
+      success: true,
+      wallets: activeWallets,
+      fallbacks: DEFAULT_COMPANY_WALLETS
+    });
+  } catch (err) {
+    console.error('Failed to get company wallets:', err);
+    return res.status(500).json({ success: false, message: 'Failed to retrieve company wallets' });
+  }
+});
+
+// POST update company deposit addresses
+router.post(['/admin/company-wallets', '/company-wallets'], async (req, res) => {
+  try {
+    const payload = req.body.wallets || req.body;
+    if (!payload || typeof payload !== 'object') {
+      return res.status(400).json({ success: false, message: 'Invalid wallets data provided' });
+    }
+
+    const currencies = ['bitcoin', 'usdt_trc20', 'usdt_bep20', 'litecoin'];
+    for (const cur of currencies) {
+      if (payload[cur] !== undefined) {
+        let newAddress = '';
+        if (typeof payload[cur] === 'string') {
+          newAddress = payload[cur].trim();
+        } else if (payload[cur] && typeof payload[cur] === 'object') {
+          newAddress = (payload[cur].address || '').trim();
+        }
+
+        const fallback = DEFAULT_COMPANY_WALLETS[cur];
+        // If empty address provided, save fallback address to DB
+        const addressToSave = newAddress.length > 0 ? newAddress : fallback.address;
+
+        await prisma.companyWallet.upsert({
+          where: { currency: cur },
+          create: {
+            currency: cur,
+            name: fallback.name,
+            network: fallback.network,
+            address: addressToSave
+          },
+          update: {
+            address: addressToSave,
+            name: fallback.name,
+            network: fallback.network
+          }
+        });
+      }
+    }
+
+    const updatedWallets = await getActiveCompanyWallets(prisma);
+    return res.json({
+      success: true,
+      message: 'Company deposit addresses updated successfully!',
+      wallets: updatedWallets,
+      fallbacks: DEFAULT_COMPANY_WALLETS
+    });
+  } catch (err) {
+    console.error('Failed to update company wallets:', err);
+    return res.status(500).json({ success: false, message: 'Failed to update company wallets' });
+  }
+});
+
+// POST reset company wallets to system default fallbacks
+router.post(['/admin/company-wallets/reset', '/company-wallets/reset'], async (req, res) => {
+  try {
+    const { currency } = req.body;
+    const targetCurrencies = currency ? [currency] : ['bitcoin', 'usdt_trc20', 'usdt_bep20', 'litecoin'];
+
+    for (const cur of targetCurrencies) {
+      const fallback = DEFAULT_COMPANY_WALLETS[cur];
+      if (fallback) {
+        await prisma.companyWallet.upsert({
+          where: { currency: cur },
+          create: {
+            currency: cur,
+            name: fallback.name,
+            network: fallback.network,
+            address: fallback.address
+          },
+          update: {
+            address: fallback.address,
+            name: fallback.name,
+            network: fallback.network
+          }
+        });
+      }
+    }
+
+    const resetWallets = await getActiveCompanyWallets(prisma);
+    return res.json({
+      success: true,
+      message: currency 
+        ? `Reset ${DEFAULT_COMPANY_WALLETS[currency]?.name || currency} to default fallback address`
+        : 'All company wallets reset to system default fallbacks!',
+      wallets: resetWallets,
+      fallbacks: DEFAULT_COMPANY_WALLETS
+    });
+  } catch (err) {
+    console.error('Failed to reset company wallets:', err);
+    return res.status(500).json({ success: false, message: 'Failed to reset company wallets' });
+  }
 });
 
 // Catch-all for any unrecognized /admin routes to prevent 404s

@@ -10,9 +10,12 @@ import { initCron, runProfitPayouts } from './services/cronService.js';
 import {
   securitySettings,
   depositPlans,
-  companyDepositWallets
+  companyDepositWallets,
+  getActiveCompanyWallets,
+  DEFAULT_COMPANY_WALLETS
 } from './lib/store.js';
 import { ensureDatabaseBootstrapped } from './lib/bootstrap.js';
+import { sendDepositEmail, sendWithdrawalEmail, sendReferralCommissionEmail } from './services/emailService.js';
 
 dotenv.config();
 
@@ -502,6 +505,13 @@ app.post('/api/withdraw', async (req, res) => {
       }
     });
 
+    // Send email notification to user asynchronously
+    sendWithdrawalEmail({
+      user,
+      withdrawal,
+      action: 'PENDING'
+    }).catch(e => console.error('Error sending withdrawal notification email:', e));
+
     const successMsg = chosenWallet === 'deposit'
       ? `Withdrawal request for ${numAmount.toFixed(2)} submitted! 50% capital withdrawal fee applied (Fee: ${charge.toFixed(2)}, Net Payout: ${netAmount.toFixed(2)}).`
       : `Withdrawal request for ${numAmount.toFixed(2)} submitted successfully!`;
@@ -601,10 +611,12 @@ app.get('/api/deposit/plans', async (req, res) => {
       };
     });
 
+    const activeWallets = await getActiveCompanyWallets(prisma);
+
     return res.json({
       success: true,
       plans: formattedPlans,
-      wallets: companyDepositWallets,
+      wallets: activeWallets,
       accountBalance: userBalance,
       userBalances
     });
@@ -665,7 +677,8 @@ app.post(['/api/deposit', '/api/deposits'], async (req, res) => {
       return res.status(401).json({ success: false, message: 'Please log in to activate an investment deposit.' });
     }
 
-    const walletInfo = companyDepositWallets[selectedProcId] || companyDepositWallets.bitcoin;
+    const activeWallets = await getActiveCompanyWallets(prisma);
+    const walletInfo = activeWallets[selectedProcId] || activeWallets.bitcoin;
 
     // Direct spend from account balance
     if (paymentMethod === 'balance') {
@@ -746,6 +759,13 @@ app.post(['/api/deposit', '/api/deposits'], async (req, res) => {
           status: 'COMPLETED'
         }
       });
+
+      // Send deposit email notification asynchronously
+      sendDepositEmail({
+        user,
+        deposit: depositOrder,
+        action: 'APPROVED'
+      }).catch(e => console.error('Error sending balance deposit email:', e));
 
       return res.json({
         success: true,
@@ -829,6 +849,13 @@ app.post(['/api/deposit', '/api/deposits'], async (req, res) => {
             }
           });
 
+          // Send deposit email notification asynchronously
+          sendDepositEmail({
+            user,
+            deposit: depositOrder,
+            action: 'PENDING'
+          }).catch(e => console.error('Error sending auto deposit email:', e));
+
           return res.json({
             success: true,
             message: 'Automatic payment address generated successfully',
@@ -876,6 +903,13 @@ app.post(['/api/deposit', '/api/deposits'], async (req, res) => {
         status: 'PENDING'
       }
     });
+
+    // Send deposit email notification asynchronously
+    sendDepositEmail({
+      user,
+      deposit: depositOrder,
+      action: 'PENDING'
+    }).catch(e => console.error('Error sending manual deposit email:', e));
 
     return res.json({
       success: true,
@@ -988,6 +1022,55 @@ app.all(['/api/oxapay-webhook', '/oxapay-webhook'], async (req, res) => {
           }
         });
 
+        // Send email notification to user asynchronously
+        prisma.user.findUnique({ where: { id: deposit.userId }, include: { referredBy: true } })
+          .then(async depositUser => {
+            if (depositUser) {
+              sendDepositEmail({
+                user: depositUser,
+                deposit: { ...deposit, status: 'APPROVED' },
+                action: 'APPROVED'
+              }).catch(e => console.error('Error sending OxaPay deposit email:', e));
+
+              // Process 10% referral commission for inviter
+              try {
+                const inviter = depositUser.referredBy || (depositUser.referredById ? await prisma.user.findUnique({ where: { id: depositUser.referredById } }) : null);
+                if (inviter) {
+                  const commAmount = parseFloat((deposit.amount * 0.10).toFixed(2));
+                  if (commAmount > 0) {
+                    await prisma.user.update({
+                      where: { id: inviter.id },
+                      data: {
+                        balance: { increment: commAmount },
+                        referralCommissions: { increment: commAmount }
+                      }
+                    });
+                    await prisma.transaction.create({
+                      data: {
+                        userId: inviter.id,
+                        type: 'COMMISSION',
+                        amount: commAmount,
+                        description: `10% Referral Commission from @${depositUser.username || depositUser.fullName || 'referral'}'s deposit of ${deposit.amount.toFixed(2)}`,
+                        status: 'COMPLETED'
+                      }
+                    });
+                    sendReferralCommissionEmail({
+                      inviter,
+                      referee: depositUser,
+                      commissionAmount: commAmount,
+                      depositAmount: deposit.amount,
+                      level: 1,
+                      percentage: 10
+                    }).catch(e => console.error('Error sending OxaPay referral commission email:', e));
+                  }
+                }
+              } catch (refErr) {
+                console.error('Error processing referral commission on OxaPay deposit:', refErr);
+              }
+            }
+          })
+          .catch(emailErr => console.error('Error querying user for OxaPay deposit email:', emailErr));
+
         return res.status(200).json({ ok: true, message: 'Deposit credited automatically' });
       }
     }
@@ -1041,6 +1124,17 @@ app.post('/api/deposit/confirm', async (req, res) => {
         adminNote: `User submitted TXID: ${txHash}`
       }
     });
+
+    // Send deposit pending verification email
+    prisma.user.findUnique({ where: { id: deposit.userId } }).then(depUser => {
+      if (depUser) {
+        sendDepositEmail({
+          user: depUser,
+          deposit: updated,
+          action: 'PENDING'
+        }).catch(e => console.error('Error sending deposit confirmation email:', e));
+      }
+    }).catch(() => {});
 
     return res.json({
       success: true,

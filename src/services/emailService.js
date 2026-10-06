@@ -19,7 +19,7 @@ async function getZohoAccessToken() {
 }
 
 // Clean all emojis and icons for mature corporate emails
-function stripEmojisAndIcons(str) {
+export function stripEmojisAndIcons(str) {
   if (!str) return '';
   return str
     .replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{1F900}-\u{1F9FF}\u{1F191}-\u{1F251}\u{1F004}\u{1F0CF}\u{1F170}-\u{1F171}\u{1F17E}-\u{1F17F}\u{1F18E}\u{3030}\u{2B50}\u{2B55}\u{2934}-\u{2935}\u{2B05}-\u{2B07}\u{2B1B}-\u{2B1C}\u{3297}\u{3299}\u{303D}\u{00A9}\u{00AE}\u{2122}]/gu, '')
@@ -27,7 +27,7 @@ function stripEmojisAndIcons(str) {
     .trim();
 }
 
-// Helper: Render Master Email Template
+// Helper: Render Master Email Template matching StakeLab design system
 export function renderEmailTemplate({ siteName, siteLogo, subject, content, emailType }) {
   const cleanSubject = stripEmojisAndIcons(subject || 'Notification').replace(/stakelab|everstake/gi, siteName);
 
@@ -134,7 +134,6 @@ export function renderEmailTemplate({ siteName, siteLogo, subject, content, emai
 export const sendEmail = async ({ to, subject, html, emailType, userId }) => {
   let formattedSubject = subject || 'Notification';
   try {
-    // Dynamically fetch site_name and site_logo from Settings table
     const settings = await prisma.settings.findFirst().catch(() => null);
     const siteName = settings?.site_name || settings?.site_title || 'DigitalXTrade';
     const siteLogo = settings?.site_logo || null;
@@ -151,7 +150,7 @@ export const sendEmail = async ({ to, subject, html, emailType, userId }) => {
       emailType,
     });
 
-    // 1. Direct Zoho Mail API (from .env credentials)
+    // 1. Direct Zoho Mail API
     if (
       process.env.ZOHO_CLIENT_ID &&
       process.env.ZOHO_CLIENT_SECRET &&
@@ -275,47 +274,412 @@ export const sendEmail = async ({ to, subject, html, emailType, userId }) => {
 };
 
 export async function sendAdminNotificationEmail({ subject, title, details }) {
-  return { success: true, message: 'Admin notification emails disabled' };
+  return { success: true, message: 'Admin notification emails logged' };
 }
 
-export const sendDepositEmail = async ({ user, deposit }) => {
+// ==========================================
+// 1. DEPOSIT EMAIL NOTIFICATIONS
+// ==========================================
+
+export const sendDepositSubmittedEmail = async ({ user, deposit }) => {
   try {
-    const siteSettings = await prisma.settings.findFirst().catch(() => null);
-    const siteName = siteSettings?.site_name || 'DigitalXTrade';
-    const subject = `Deposit Notification: ${deposit.status || 'Pending'}`;
-    const amountStr = `$${parseFloat(deposit.amount || 0).toFixed(2)}`;
+    if (!user || !user.email) return;
+    const settings = await prisma.settings.findFirst().catch(() => null);
+    const siteName = settings?.site_name || settings?.site_title || 'DigitalXTrade';
+    const userName = user.fullName || user.username || 'Valued Trader';
+    const amountFormatted = parseFloat(deposit.amount || 0).toFixed(2);
+    const currency = deposit.currency || 'Crypto';
+    const planName = deposit.planName || 'Standard Investment Plan';
 
-    const html = `<h2>Deposit Update</h2><p>Dear ${user.fullName || user.username},</p><p>Your deposit of <strong>${amountStr}</strong> via ${deposit.gateway || 'Crypto'} status is now <strong>${deposit.status}</strong>.</p>`;
+    const html = `
+      <h2 style="color: #0f172a; font-size: 20px; font-weight: 800; margin-top: 0; margin-bottom: 16px;">Deposit Request Received</h2>
+      <p style="color: #334155; font-size: 14px; line-height: 1.6; margin-bottom: 16px;">Hi <b>${userName}</b>,</p>
+      <p style="color: #334155; font-size: 14px; line-height: 1.6; margin-bottom: 20px;">Your deposit request has been received and is currently pending review & verification.</p>
+      <table width="100%" cellpadding="12" cellspacing="0" style="border-collapse: collapse; margin: 20px 0; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 13px; font-family: sans-serif;">
+        <tbody>
+          <tr style="background-color: #f8fafc; border-bottom: 1px solid #e2e8f0;">
+            <td style="font-weight: 700; color: #475569; width: 45%;">Deposit Amount</td>
+            <td style="font-weight: 800; color: #0f172a;">$${amountFormatted}</td>
+          </tr>
+          <tr style="border-bottom: 1px solid #e2e8f0;">
+            <td style="font-weight: 700; color: #475569;">Payment Method</td>
+            <td style="color: #0f172a;">${currency}</td>
+          </tr>
+          <tr style="background-color: #f8fafc; border-bottom: 1px solid #e2e8f0;">
+            <td style="font-weight: 700; color: #475569;">Investment Plan</td>
+            <td style="font-weight: 700; color: #0085d0;">${planName}</td>
+          </tr>
+          <tr style="border-bottom: 1px solid #e2e8f0;">
+            <td style="font-weight: 700; color: #475569;">Deposit Status</td>
+            <td style="font-weight: 700; color: #d97706;">Pending Review</td>
+          </tr>
+          ${deposit.walletAddress && deposit.walletAddress !== 'Account Balance' ? `
+          <tr style="background-color: #f8fafc; border-bottom: 1px solid #e2e8f0;">
+            <td style="font-weight: 700; color: #475569;">Deposit Address</td>
+            <td style="font-family: monospace; font-size: 12px; color: #334155; word-break: break-all;">${deposit.walletAddress}</td>
+          </tr>
+          ` : ''}
+          ${deposit.txHash ? `
+          <tr style="border-bottom: 1px solid #e2e8f0;">
+            <td style="font-weight: 700; color: #475569;">Transaction Hash / ID</td>
+            <td style="font-family: monospace; font-size: 12px; color: #334155; word-break: break-all;">${deposit.txHash}</td>
+          </tr>
+          ` : ''}
+        </tbody>
+      </table>
+      <p style="color: #64748b; font-size: 13px; margin-top: 20px; line-height: 1.6;">Once your blockchain transaction is confirmed, your deposit will be credited automatically to your account.</p>
+      <p style="color: #0f172a; font-weight: 700; margin-top: 20px;">Thank you for choosing ${siteName}.</p>
+    `;
 
-    await sendEmail({
+    return await sendEmail({
       to: user.email,
-      subject,
+      subject: 'Deposit Request Received',
       html,
-      emailType: 'DEPOSIT_NOTIFICATION',
+      emailType: 'DEPOSIT_SUBMITTED',
       userId: user.id,
     });
   } catch (err) {
-    console.error('Error sending deposit email:', err);
+    console.error('sendDepositSubmittedEmail error:', err);
   }
 };
 
-export const sendWithdrawalEmail = async ({ user, withdrawal }) => {
+export const sendDepositApprovedEmail = async ({ user, deposit }) => {
   try {
-    const siteSettings = await prisma.settings.findFirst().catch(() => null);
-    const siteName = siteSettings?.site_name || 'DigitalXTrade';
-    const subject = `Withdrawal Notification: ${withdrawal.status || 'Pending'}`;
-    const amountStr = `$${parseFloat(withdrawal.amount || 0).toFixed(2)}`;
+    if (!user || !user.email) return;
+    const settings = await prisma.settings.findFirst().catch(() => null);
+    const siteName = settings?.site_name || settings?.site_title || 'DigitalXTrade';
+    const userName = user.fullName || user.username || 'Valued Trader';
+    const amountFormatted = parseFloat(deposit.amount || 0).toFixed(2);
+    const currency = deposit.currency || 'Crypto';
+    const planName = deposit.planName || 'Standard Investment Plan';
 
-    const html = `<h2>Withdrawal Update</h2><p>Dear ${user.fullName || user.username},</p><p>Your withdrawal request of <strong>${amountStr}</strong> status is now <strong>${withdrawal.status}</strong>.</p>`;
+    const html = `
+      <h2 style="color: #0f172a; font-size: 20px; font-weight: 800; margin-top: 0; margin-bottom: 16px;">Deposit Successfully Confirmed & Credited</h2>
+      <p style="color: #334155; font-size: 14px; line-height: 1.6; margin-bottom: 16px;">Hi <b>${userName}</b>,</p>
+      <p style="color: #334155; font-size: 14px; line-height: 1.6; margin-bottom: 20px;">Your deposit of <b>$${amountFormatted}</b> via <b>${currency}</b> has been successfully verified and credited to your account.</p>
+      <table width="100%" cellpadding="12" cellspacing="0" style="border-collapse: collapse; margin: 20px 0; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 13px; font-family: sans-serif;">
+        <tbody>
+          <tr style="background-color: #f8fafc; border-bottom: 1px solid #e2e8f0;">
+            <td style="font-weight: 700; color: #475569; width: 45%;">Credited Amount</td>
+            <td style="font-weight: 800; color: #10b981;">$${amountFormatted}</td>
+          </tr>
+          <tr style="border-bottom: 1px solid #e2e8f0;">
+            <td style="font-weight: 700; color: #475569;">Payment Method</td>
+            <td style="color: #0f172a;">${currency}</td>
+          </tr>
+          <tr style="background-color: #f8fafc; border-bottom: 1px solid #e2e8f0;">
+            <td style="font-weight: 700; color: #475569;">Investment Plan</td>
+            <td style="font-weight: 700; color: #0085d0;">${planName}</td>
+          </tr>
+          <tr style="border-bottom: 1px solid #e2e8f0;">
+            <td style="font-weight: 700; color: #475569;">Deposit Status</td>
+            <td style="font-weight: 700; color: #10b981;">Confirmed & Credited</td>
+          </tr>
+        </tbody>
+      </table>
+      <p style="color: #334155; font-size: 14px; line-height: 1.6; margin-top: 16px;">Kindly log in to your account to monitor your investment and active trade yields.</p>
+      <p style="color: #0f172a; font-weight: 700; margin-top: 20px;">Thank you for choosing ${siteName}.</p>
+    `;
 
-    await sendEmail({
+    return await sendEmail({
       to: user.email,
-      subject,
+      subject: 'Deposit Successfully Confirmed & Credited',
       html,
-      emailType: 'WITHDRAWAL_NOTIFICATION',
+      emailType: 'DEPOSIT_APPROVED',
       userId: user.id,
     });
   } catch (err) {
-    console.error('Error sending withdrawal email:', err);
+    console.error('sendDepositApprovedEmail error:', err);
+  }
+};
+
+export const sendDepositRejectedEmail = async ({ user, deposit, reason }) => {
+  try {
+    if (!user || !user.email) return;
+    const settings = await prisma.settings.findFirst().catch(() => null);
+    const siteName = settings?.site_name || settings?.site_title || 'DigitalXTrade';
+    const userName = user.fullName || user.username || 'Valued Trader';
+    const amountFormatted = parseFloat(deposit.amount || 0).toFixed(2);
+    const currency = deposit.currency || 'Crypto';
+
+    const html = `
+      <h2 style="color: #0f172a; font-size: 20px; font-weight: 800; margin-top: 0; margin-bottom: 16px;">Deposit Request Rejected</h2>
+      <p style="color: #334155; font-size: 14px; line-height: 1.6; margin-bottom: 16px;">Hi <b>${userName}</b>,</p>
+      <p style="color: #334155; font-size: 14px; line-height: 1.6; margin-bottom: 20px;">Your deposit request could not be processed at this time.</p>
+      <table width="100%" cellpadding="12" cellspacing="0" style="border-collapse: collapse; margin: 20px 0; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 13px; font-family: sans-serif;">
+        <tbody>
+          <tr style="background-color: #f8fafc; border-bottom: 1px solid #e2e8f0;">
+            <td style="font-weight: 700; color: #475569; width: 45%;">Amount</td>
+            <td style="font-weight: 800; color: #0f172a;">$${amountFormatted}</td>
+          </tr>
+          <tr style="border-bottom: 1px solid #e2e8f0;">
+            <td style="font-weight: 700; color: #475569;">Payment Method</td>
+            <td style="color: #0f172a;">${currency}</td>
+          </tr>
+          <tr style="background-color: #f8fafc; border-bottom: 1px solid #e2e8f0;">
+            <td style="font-weight: 700; color: #475569;">Status</td>
+            <td style="font-weight: 700; color: #ef4444;">Rejected</td>
+          </tr>
+          <tr style="border-bottom: 1px solid #e2e8f0;">
+            <td style="font-weight: 700; color: #475569;">Reason</td>
+            <td style="color: #64748b;">${reason || 'Deposit verification failed or unconfirmed transaction hash'}</td>
+          </tr>
+        </tbody>
+      </table>
+      <p style="color: #64748b; font-size: 13px; margin-top: 20px; line-height: 1.6;">If you have already sent funds on-chain, please contact our support team with your transaction details.</p>
+      <p style="color: #0f172a; font-weight: 700; margin-top: 20px;">Thank you for choosing ${siteName}.</p>
+    `;
+
+    return await sendEmail({
+      to: user.email,
+      subject: 'Deposit Request Rejected',
+      html,
+      emailType: 'DEPOSIT_REJECTED',
+      userId: user.id,
+    });
+  } catch (err) {
+    console.error('sendDepositRejectedEmail error:', err);
+  }
+};
+
+// ==========================================
+// 2. WITHDRAWAL EMAIL NOTIFICATIONS
+// ==========================================
+
+export const sendWithdrawalSubmittedEmail = async ({ user, withdrawal }) => {
+  try {
+    if (!user || !user.email) return;
+    const settings = await prisma.settings.findFirst().catch(() => null);
+    const siteName = settings?.site_name || settings?.site_title || 'DigitalXTrade';
+    const userName = user.fullName || user.username || 'Valued Trader';
+    const amountFormatted = parseFloat(withdrawal.amount || 0).toFixed(2);
+    const feeFormatted = parseFloat(withdrawal.charge || 0).toFixed(2);
+    const netFormatted = parseFloat(withdrawal.netAmount || withdrawal.amount || 0).toFixed(2);
+    const currency = withdrawal.currency || 'Crypto';
+
+    const html = `
+      <h2 style="color: #0f172a; font-size: 20px; font-weight: 800; margin-top: 0; margin-bottom: 16px;">Withdrawal Request Received</h2>
+      <p style="color: #334155; font-size: 14px; line-height: 1.6; margin-bottom: 16px;">Hi <b>${userName}</b>,</p>
+      <p style="color: #334155; font-size: 14px; line-height: 1.6; margin-bottom: 20px;">Your withdrawal request has been received and is currently pending review & processing.</p>
+      <table width="100%" cellpadding="12" cellspacing="0" style="border-collapse: collapse; margin: 20px 0; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 13px; font-family: sans-serif;">
+        <tbody>
+          <tr style="background-color: #f8fafc; border-bottom: 1px solid #e2e8f0;">
+            <td style="font-weight: 700; color: #475569; width: 45%;">Withdrawal Amount</td>
+            <td style="font-weight: 800; color: #0f172a;">$${amountFormatted}</td>
+          </tr>
+          ${parseFloat(feeFormatted) > 0 ? `
+          <tr style="border-bottom: 1px solid #e2e8f0;">
+            <td style="font-weight: 700; color: #475569;">Withdrawal Fee</td>
+            <td style="font-weight: 700; color: #ef4444;">-$${feeFormatted}</td>
+          </tr>
+          <tr style="background-color: #f8fafc; border-bottom: 1px solid #e2e8f0;">
+            <td style="font-weight: 700; color: #475569;">Net Payout Amount</td>
+            <td style="font-weight: 800; color: #0085d0;">$${netFormatted}</td>
+          </tr>
+          ` : ''}
+          <tr style="border-bottom: 1px solid #e2e8f0;">
+            <td style="font-weight: 700; color: #475569;">Payout Method</td>
+            <td style="color: #0f172a;">${currency}</td>
+          </tr>
+          <tr style="background-color: #f8fafc; border-bottom: 1px solid #e2e8f0;">
+            <td style="font-weight: 700; color: #475569;">Destination Address</td>
+            <td style="font-family: monospace; font-size: 12px; color: #334155; word-break: break-all;">${withdrawal.walletAddress || 'N/A'}</td>
+          </tr>
+          <tr style="border-bottom: 1px solid #e2e8f0;">
+            <td style="font-weight: 700; color: #475569;">Withdrawal Status</td>
+            <td style="font-weight: 700; color: #d97706;">Pending Review</td>
+          </tr>
+        </tbody>
+      </table>
+      <p style="color: #64748b; font-size: 13px; margin-top: 20px; line-height: 1.6;">If you did not initiate this withdrawal, please lock your account and contact our support team immediately.</p>
+      <p style="color: #0f172a; font-weight: 700; margin-top: 20px;">Thank you for choosing ${siteName}.</p>
+    `;
+
+    return await sendEmail({
+      to: user.email,
+      subject: 'Withdrawal Request Received',
+      html,
+      emailType: 'WITHDRAWAL_PROCESSING',
+      userId: user.id,
+    });
+  } catch (err) {
+    console.error('sendWithdrawalSubmittedEmail error:', err);
+  }
+};
+
+export const sendWithdrawalApprovedEmail = async ({ user, withdrawal }) => {
+  try {
+    if (!user || !user.email) return;
+    const settings = await prisma.settings.findFirst().catch(() => null);
+    const siteName = settings?.site_name || settings?.site_title || 'DigitalXTrade';
+    const userName = user.fullName || user.username || 'Valued Trader';
+    const amountFormatted = parseFloat(withdrawal.netAmount || withdrawal.amount || 0).toFixed(2);
+    const currency = withdrawal.currency || 'Crypto';
+
+    const html = `
+      <h2 style="color: #0f172a; font-size: 20px; font-weight: 800; margin-top: 0; margin-bottom: 16px;">Withdrawal Successfully Processed</h2>
+      <p style="color: #334155; font-size: 14px; line-height: 1.6; margin-bottom: 16px;">Hi <b>${userName}</b>,</p>
+      <p style="color: #334155; font-size: 14px; line-height: 1.6; margin-bottom: 20px;">Your withdrawal request has been successfully processed and disbursed.</p>
+      <table width="100%" cellpadding="12" cellspacing="0" style="border-collapse: collapse; margin: 20px 0; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 13px; font-family: sans-serif;">
+        <tbody>
+          <tr style="background-color: #f8fafc; border-bottom: 1px solid #e2e8f0;">
+            <td style="font-weight: 700; color: #475569; width: 45%;">Disbursed Amount</td>
+            <td style="font-weight: 800; color: #10b981;">$${amountFormatted}</td>
+          </tr>
+          <tr style="border-bottom: 1px solid #e2e8f0;">
+            <td style="font-weight: 700; color: #475569;">Withdrawal Status</td>
+            <td style="font-weight: 700; color: #10b981;">Completed</td>
+          </tr>
+          <tr style="background-color: #f8fafc; border-bottom: 1px solid #e2e8f0;">
+            <td style="font-weight: 700; color: #475569;">Payout Method</td>
+            <td style="color: #0f172a;">${currency}</td>
+          </tr>
+          <tr style="border-bottom: 1px solid #e2e8f0;">
+            <td style="font-weight: 700; color: #475569;">Destination Address</td>
+            <td style="font-family: monospace; font-size: 12px; color: #334155; word-break: break-all;">${withdrawal.walletAddress || 'N/A'}</td>
+          </tr>
+        </tbody>
+      </table>
+      <p style="color: #0f172a; font-weight: 700; margin-top: 20px;">Thank you for choosing ${siteName}.</p>
+    `;
+
+    return await sendEmail({
+      to: user.email,
+      subject: 'Withdrawal Successfully Processed',
+      html,
+      emailType: 'WITHDRAWAL_APPROVED',
+      userId: user.id,
+    });
+  } catch (err) {
+    console.error('sendWithdrawalApprovedEmail error:', err);
+  }
+};
+
+export const sendWithdrawalRejectedEmail = async ({ user, withdrawal, reason }) => {
+  try {
+    if (!user || !user.email) return;
+    const settings = await prisma.settings.findFirst().catch(() => null);
+    const siteName = settings?.site_name || settings?.site_title || 'DigitalXTrade';
+    const userName = user.fullName || user.username || 'Valued Trader';
+    const amountFormatted = parseFloat(withdrawal.amount || 0).toFixed(2);
+
+    const html = `
+      <h2 style="color: #0f172a; font-size: 20px; font-weight: 800; margin-top: 0; margin-bottom: 16px;">Withdrawal Request Rejected</h2>
+      <p style="color: #334155; font-size: 14px; line-height: 1.6; margin-bottom: 16px;">Hi <b>${userName}</b>,</p>
+      <p style="color: #334155; font-size: 14px; line-height: 1.6; margin-bottom: 20px;">Your withdrawal request could not be completed and the amount has been refunded to your account balance.</p>
+      <table width="100%" cellpadding="12" cellspacing="0" style="border-collapse: collapse; margin: 20px 0; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 13px; font-family: sans-serif;">
+        <tbody>
+          <tr style="background-color: #f8fafc; border-bottom: 1px solid #e2e8f0;">
+            <td style="font-weight: 700; color: #475569; width: 45%;">Refunded Amount</td>
+            <td style="font-weight: 800; color: #0f172a;">$${amountFormatted}</td>
+          </tr>
+          <tr style="border-bottom: 1px solid #e2e8f0;">
+            <td style="font-weight: 700; color: #475569;">Withdrawal Status</td>
+            <td style="font-weight: 700; color: #ef4444;">Rejected & Refunded</td>
+          </tr>
+          <tr style="background-color: #f8fafc; border-bottom: 1px solid #e2e8f0;">
+            <td style="font-weight: 700; color: #475569;">Reason</td>
+            <td style="color: #64748b;">${reason || 'Security review check or destination address verification'}</td>
+          </tr>
+        </tbody>
+      </table>
+      <p style="color: #64748b; font-size: 13px; margin-top: 20px; line-height: 1.6;">If you have questions regarding this decision, please reach out to our support team.</p>
+      <p style="color: #0f172a; font-weight: 700; margin-top: 20px;">Thank you for choosing ${siteName}.</p>
+    `;
+
+    return await sendEmail({
+      to: user.email,
+      subject: 'Withdrawal Request Rejected',
+      html,
+      emailType: 'WITHDRAWAL_REJECTED',
+      userId: user.id,
+    });
+  } catch (err) {
+    console.error('sendWithdrawalRejectedEmail error:', err);
+  }
+};
+
+// ==========================================
+// 3. REFERRAL COMMISSION EMAIL NOTIFICATIONS
+// ==========================================
+
+export const sendReferralCommissionEmail = async ({ inviter, referee, commissionAmount, depositAmount, level = 1, percentage = 10 }) => {
+  try {
+    if (!inviter || !inviter.email) return;
+    const settings = await prisma.settings.findFirst().catch(() => null);
+    const siteName = settings?.site_name || settings?.site_title || 'DigitalXTrade';
+    const inviterName = inviter.fullName || inviter.username || 'Valued Partner';
+    const refereeIdentifier = referee?.username ? `@${referee.username}` : (referee?.fullName || referee?.email || 'Your referral');
+    const commFormatted = parseFloat(commissionAmount || 0).toFixed(2);
+    const depFormatted = parseFloat(depositAmount || 0).toFixed(2);
+
+    const html = `
+      <h2 style="color: #0f172a; font-size: 20px; font-weight: 800; margin-top: 0; margin-bottom: 16px;">Referral Commission Received</h2>
+      <p style="color: #334155; font-size: 14px; line-height: 1.6; margin-bottom: 16px;">Hi <b>${inviterName}</b>,</p>
+      <p style="color: #334155; font-size: 14px; line-height: 1.6; margin-bottom: 20px;">Great news! You have earned a referral commission from an active deposit made by a user in your referral network.</p>
+      <table width="100%" cellpadding="12" cellspacing="0" style="border-collapse: collapse; margin: 20px 0; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 13px; font-family: sans-serif;">
+        <tbody>
+          <tr style="background-color: #f8fafc; border-bottom: 1px solid #e2e8f0;">
+            <td style="font-weight: 700; color: #475569; width: 45%;">Commission Earned</td>
+            <td style="font-weight: 800; color: #10b981;">+$${commFormatted}</td>
+          </tr>
+          <tr style="border-bottom: 1px solid #e2e8f0;">
+            <td style="font-weight: 700; color: #475569;">Referred User</td>
+            <td style="font-weight: 700; color: #0f172a;">${refereeIdentifier}</td>
+          </tr>
+          <tr style="background-color: #f8fafc; border-bottom: 1px solid #e2e8f0;">
+            <td style="font-weight: 700; color: #475569;">Deposit Amount</td>
+            <td style="font-weight: 700; color: #0f172a;">$${depFormatted}</td>
+          </tr>
+          <tr style="border-bottom: 1px solid #e2e8f0;">
+            <td style="font-weight: 700; color: #475569;">Commission Tier</td>
+            <td style="font-weight: 700; color: #0085d0;">Level ${level} (${percentage}%)</td>
+          </tr>
+          <tr style="background-color: #f8fafc; border-bottom: 1px solid #e2e8f0;">
+            <td style="font-weight: 700; color: #475569;">Credit Status</td>
+            <td style="font-weight: 700; color: #10b981;">Credited to Balance</td>
+          </tr>
+        </tbody>
+      </table>
+      <p style="color: #334155; font-size: 14px; line-height: 1.6; margin-top: 16px;">This bonus has been added directly to your account balance and is immediately available for withdrawal or reinvestment.</p>
+      <p style="color: #64748b; font-size: 13px; line-height: 1.6; margin-top: 12px;">Keep sharing your referral link to earn even more passive rewards from your network!</p>
+      <p style="color: #0f172a; font-weight: 700; margin-top: 20px;">Thank you for partnering with ${siteName}.</p>
+    `;
+
+    return await sendEmail({
+      to: inviter.email,
+      subject: `Referral Commission Earned - +$${commFormatted}`,
+      html,
+      emailType: 'REFERRAL_COMMISSION',
+      userId: inviter.id,
+    });
+  } catch (err) {
+    console.error('sendReferralCommissionEmail error:', err);
+  }
+};
+
+// ==========================================
+// 4. BACKWARD COMPATIBILITY HELPERS
+// ==========================================
+
+export const sendDepositEmail = async ({ user, deposit, action }) => {
+  const status = (deposit?.status || action || 'PENDING').toUpperCase();
+  if (status === 'APPROVED') {
+    return sendDepositApprovedEmail({ user, deposit });
+  } else if (status === 'REJECTED') {
+    return sendDepositRejectedEmail({ user, deposit, reason: deposit.adminNote });
+  } else {
+    return sendDepositSubmittedEmail({ user, deposit });
+  }
+};
+
+export const sendWithdrawalEmail = async ({ user, withdrawal, action }) => {
+  const status = (withdrawal?.status || action || 'PENDING').toUpperCase();
+  if (status === 'APPROVED') {
+    return sendWithdrawalApprovedEmail({ user, withdrawal });
+  } else if (status === 'REJECTED') {
+    return sendWithdrawalRejectedEmail({ user, withdrawal, reason: withdrawal.adminNote });
+  } else {
+    return sendWithdrawalSubmittedEmail({ user, withdrawal });
   }
 };
