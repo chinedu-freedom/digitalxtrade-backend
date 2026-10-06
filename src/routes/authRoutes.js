@@ -312,8 +312,8 @@ router.post(['/login', '/admin/login'], async (req, res) => {
   }
 });
 
-// GET /api/auth/me
-router.get('/me', async (req, res) => {
+// GET /api/auth/me & /api/auth/admin/me
+router.get(['/me', '/admin/me'], async (req, res) => {
   try {
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -334,6 +334,7 @@ router.get('/me', async (req, res) => {
     return res.json({
       success: true,
       user: formatUser(user),
+      admin: formatUser(user),
     });
   } catch (error) {
     console.error('Auth /me error:', error);

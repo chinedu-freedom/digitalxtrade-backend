@@ -8,8 +8,6 @@ import authRoutes from './routes/authRoutes.js';
 import adminRoutes from './routes/adminRoutes.js';
 import { initCron, runProfitPayouts } from './services/cronService.js';
 import {
-  securitySettings,
-  depositPlans,
   companyDepositWallets,
   getActiveCompanyWallets,
   DEFAULT_COMPANY_WALLETS
@@ -93,24 +91,19 @@ const getAuthUser = async (req) => {
 
 // Helper to get or initialize security settings from database
 const getOrCreateSecuritySettings = async () => {
-  try {
-    let settings = await prisma.securitySetting.findFirst();
-    if (!settings) {
-      settings = await prisma.securitySetting.create({
-        data: {
-          ipSensitivity: 'disabled',
-          browserChange: 'disabled',
-          twoFactorEnabled: false,
-          secretCode: 'JRZE4OI7K5GLALIG',
-          otpAuthUrl: 'otpauth://totp/DigitalXTrade:user?secret=JRZE4OI7K5GLALIG&issuer=DigitalXTrade'
-        }
-      });
-    }
-    return settings;
-  } catch (err) {
-    console.error('Error fetching database security settings, falling back to memory:', err);
-    return securitySettings;
+  let settings = await prisma.securitySetting.findFirst();
+  if (!settings) {
+    settings = await prisma.securitySetting.create({
+      data: {
+        ipSensitivity: 'disabled',
+        browserChange: 'disabled',
+        twoFactorEnabled: false,
+        secretCode: 'JRZE4OI7K5GLALIG',
+        otpAuthUrl: 'otpauth://totp/DigitalXTrade:user?secret=JRZE4OI7K5GLALIG&issuer=DigitalXTrade'
+      }
+    });
   }
+  return settings;
 };
 
 // GET current security settings
@@ -135,15 +128,13 @@ app.post('/api/security/settings', async (req, res) => {
     const dataToUpdate = {};
     if (ipSensitivity && ['disabled', 'medium', 'high', 'paranoic'].includes(ipSensitivity.toLowerCase())) {
       dataToUpdate.ipSensitivity = ipSensitivity.toLowerCase();
-      securitySettings.ipSensitivity = dataToUpdate.ipSensitivity;
     }
 
     if (browserChange && ['disabled', 'enabled'].includes(browserChange.toLowerCase())) {
       dataToUpdate.browserChange = browserChange.toLowerCase();
-      securitySettings.browserChange = dataToUpdate.browserChange;
     }
 
-    if (settings && settings.id) {
+    if (Object.keys(dataToUpdate).length > 0) {
       settings = await prisma.securitySetting.update({
         where: { id: settings.id },
         data: dataToUpdate
@@ -181,13 +172,10 @@ app.post('/api/security/2fa/enable', async (req, res) => {
       dataToUpdate.otpAuthUrl = `otpauth://totp/DigitalXTrade:user?secret=${secret}&issuer=DigitalXTrade`;
     }
 
-    if (settings && settings.id) {
-      settings = await prisma.securitySetting.update({
-        where: { id: settings.id },
-        data: dataToUpdate
-      });
-    }
-    securitySettings.twoFactorEnabled = true;
+    settings = await prisma.securitySetting.update({
+      where: { id: settings.id },
+      data: dataToUpdate
+    });
 
     return res.json({
       success: true,
@@ -205,13 +193,10 @@ app.post('/api/security/2fa/disable', async (req, res) => {
   try {
     let settings = await getOrCreateSecuritySettings();
 
-    if (settings && settings.id) {
-      settings = await prisma.securitySetting.update({
-        where: { id: settings.id },
-        data: { twoFactorEnabled: false }
-      });
-    }
-    securitySettings.twoFactorEnabled = false;
+    settings = await prisma.securitySetting.update({
+      where: { id: settings.id },
+      data: { twoFactorEnabled: false }
+    });
 
     return res.json({
       success: true,

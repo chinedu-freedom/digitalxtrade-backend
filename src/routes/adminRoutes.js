@@ -2,7 +2,7 @@ import express from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import prisma from '../lib/prisma.js';
-import { depositPlans, companyDepositWallets, getActiveCompanyWallets, DEFAULT_COMPANY_WALLETS } from '../lib/store.js';
+import { companyDepositWallets, getActiveCompanyWallets, DEFAULT_COMPANY_WALLETS } from '../lib/store.js';
 import { sendDepositEmail, sendWithdrawalEmail, sendReferralCommissionEmail } from '../services/emailService.js';
 
 const router = express.Router();
