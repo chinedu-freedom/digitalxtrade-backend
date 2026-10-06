@@ -371,6 +371,12 @@ export const sendDepositApprovedEmail = async ({ user, deposit }) => {
             <td style="font-weight: 700; color: #475569;">Investment Plan</td>
             <td style="font-weight: 700; color: #0085d0;">${planName}</td>
           </tr>
+          ${deposit.targetWalletLabel ? `
+          <tr style="border-bottom: 1px solid #e2e8f0;">
+            <td style="font-weight: 700; color: #475569;">Credited Wallet</td>
+            <td style="font-weight: 700; color: #0085d0;">${deposit.targetWalletLabel}</td>
+          </tr>
+          ` : ''}
           <tr style="border-bottom: 1px solid #e2e8f0;">
             <td style="font-weight: 700; color: #475569;">Deposit Status</td>
             <td style="font-weight: 700; color: #10b981;">Confirmed & Credited</td>

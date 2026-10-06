@@ -790,6 +790,10 @@ router.get(['/admin/deposit/details/:id', '/admin/deposits/:id'], async (req, re
 router.post('/admin/deposits/:id/approve', async (req, res) => {
   try {
     const { id } = req.params;
+    const targetWallet = (req.body?.targetWallet || req.body?.destinationWallet || req.body?.walletType || 'deposit').toLowerCase();
+    const isProfit = targetWallet === 'profit';
+    const targetWalletLabel = isProfit ? 'Profit Balance (Earnings)' : 'Deposit Balance (Capital)';
+
     const deposit = await prisma.deposit.findUnique({
       where: { id },
       include: { user: true }
@@ -800,16 +804,26 @@ router.post('/admin/deposits/:id/approve', async (req, res) => {
 
     const updatedDeposit = await prisma.deposit.update({
       where: { id },
-      data: { status: 'APPROVED' }
+      data: {
+        status: 'APPROVED',
+        adminNote: req.body?.adminNote || (isProfit ? 'Credited to Profit Balance' : 'Credited to Deposit Balance')
+      }
     });
 
-    // Credit user's balance and update totalDeposits
+    // Credit user's main balance, target wallet (depositBalance or profitBalance), and update totalDeposits
     if (deposit.userId) {
       const field = getCurrencyField(deposit.currency);
       const updateData = {
         balance: { increment: deposit.amount },
         totalDeposits: { increment: deposit.amount }
       };
+
+      if (isProfit) {
+        updateData.profitBalance = { increment: deposit.amount };
+      } else {
+        updateData.depositBalance = { increment: deposit.amount };
+      }
+
       if (field) {
         updateData[field] = { increment: deposit.amount };
       }
@@ -820,6 +834,8 @@ router.post('/admin/deposits/:id/approve', async (req, res) => {
       });
 
       // Update existing transaction record (or create if not found) so single transaction card is maintained
+      const txDescription = `Deposit approved to ${targetWalletLabel} via ${deposit.currency} (${deposit.planName || 'Plan'})`;
+
       const existingTx = await prisma.transaction.findFirst({
         where: {
           OR: [
@@ -835,7 +851,7 @@ router.post('/admin/deposits/:id/approve', async (req, res) => {
           where: { id: existingTx.id },
           data: {
             status: 'COMPLETED',
-            description: `Deposit approved via ${deposit.currency} (${deposit.planName || 'Plan'})`
+            description: txDescription
           }
         });
       } else {
@@ -845,7 +861,7 @@ router.post('/admin/deposits/:id/approve', async (req, res) => {
             userId: deposit.userId,
             type: 'DEPOSIT',
             amount: deposit.amount,
-            description: `Deposit approved via ${deposit.currency} (${deposit.planName || 'Plan'})`,
+            description: txDescription,
             status: 'COMPLETED'
           }
         });
@@ -896,15 +912,17 @@ router.post('/admin/deposits/:id/approve', async (req, res) => {
     if (deposit.user) {
       sendDepositEmail({
         user: deposit.user,
-        deposit: updatedDeposit,
+        deposit: { ...updatedDeposit, targetWalletLabel },
         action: 'APPROVED'
       }).catch(e => console.error('Error sending deposit approval email:', e));
     }
 
     return res.json({
       success: true,
-      message: 'Deposit approved successfully!',
-      deposit: updatedDeposit
+      message: `Deposit approved successfully and credited to ${targetWalletLabel}!`,
+      deposit: updatedDeposit,
+      targetWallet: isProfit ? 'profit' : 'deposit',
+      targetWalletLabel
     });
   } catch (err) {
     console.error('Approve deposit error:', err);
