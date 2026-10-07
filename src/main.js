@@ -24,12 +24,20 @@ const JWT_SECRET = process.env.JWT_SECRET || 'digital-project-secret-key-2026';
 
 // Comprehensive CORS and OPTIONS preflight handling
 app.use(cors({
-  origin: '*',
+  origin: true, // Echo origin to allow credentials safely across subdomains
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'x-user-id', 'x-auth-token'],
   credentials: true
 }));
-app.options('*', cors());
+
+app.options('*', (req, res) => {
+  res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
+  res.header('Access-Control-Allow-Credentials', 'true');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, x-user-id, x-auth-token');
+  res.sendStatus(204);
+});
+
 app.use(express.json());
 
 // API Auth and Admin Routes (DigitalXTrade Database Synced)
