@@ -27,8 +27,8 @@ export function stripEmojisAndIcons(str) {
     .trim();
 }
 
-// Helper: Render Master Email Template matching StakeLab design system
-export function renderEmailTemplate({ siteName, siteLogo, subject, content, emailType }) {
+// Helper: Render Master Email Template with Dual-Theme (Light/Dark mode) support
+export function renderEmailTemplate({ siteName = 'DigitalXTrade', siteLogo = null, subject, content, emailType }) {
   const cleanSubject = stripEmojisAndIcons(subject || 'Notification').replace(/stakelab|everstake/gi, siteName);
 
   if (typeof content === 'string' && content.includes('<!DOCTYPE')) {
@@ -51,40 +51,41 @@ export function renderEmailTemplate({ siteName, siteLogo, subject, content, emai
 
       innerContentHtml = `
         <div style="text-align:center; padding:10px 0;">
-          <h2 style="color:#0f172a; margin-bottom:10px;">${cleanSubject}</h2>
-          <p style="color:#475569; font-size:15px; line-height:1.6; margin-bottom: 20px;">
+          <h2 class="email-title" style="color:#0f172a; margin-bottom:12px; font-size:22px; font-weight:700; line-height:1.3; font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">${cleanSubject}</h2>
+          <p class="email-desc" style="color:#475569; font-size:15px; line-height:1.6; margin-bottom: 22px; font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
             Please use the confirmation code below to authorize your request:
           </p>
 
           <div style="margin:24px 0; text-align:center; white-space: nowrap !important;">
-            <span style="
-              background: #eaf4fb;
-              color: #0085d0;
-              padding: 12px 28px;
+            <span class="email-code-box" style="
+              background: #fef9c3;
+              color: #b58117;
+              padding: 13px 30px;
               font-size: 26px;
               font-weight: 900;
               letter-spacing: 6px;
-              border: 2px dashed #0085d0;
+              border: 2px dashed #b58117;
               border-radius: 12px;
               display: inline-block;
               white-space: nowrap !important;
               word-break: keep-all !important;
+              font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monospace;
             ">
               ${displayCode}
             </span>
           </div>
 
-          <p style="font-size:14px; color:#64748b; margin-top:16px;">
+          <p class="email-notice" style="font-size:14px; color:#64748b; margin-top:18px; line-height:1.5;">
             This code is valid for <strong>10 minutes</strong>. Never share this code with anyone.
           </p>
-          <p style="font-size:12px; color:#94a3b8; margin-top:24px;">
+          <p class="email-subnotice" style="font-size:12px; color:#94a3b8; margin-top:24px; line-height:1.5;">
             If you did not make this request, please secure your account immediately or contact support.
           </p>
         </div>
       `;
     } else {
       innerContentHtml = `
-        <div style="color: #0f172a; font-size: 15px; line-height: 1.7; font-weight: 500;">
+        <div class="email-desc" style="color: #334155; font-size: 15px; line-height: 1.7; font-weight: 500; font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
           ${cleanContent}
         </div>
       `;
@@ -96,28 +97,72 @@ export function renderEmailTemplate({ siteName, siteLogo, subject, content, emai
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="light dark">
+  <meta name="supported-color-schemes" content="light dark">
+  <title>${cleanSubject}</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      supported-color-schemes: light dark;
+    }
+    @media (prefers-color-scheme: dark) {
+      body, .email-bg { background-color: #0b0d14 !important; }
+      .email-card { background-color: #12151e !important; border-color: #1f2333 !important; box-shadow: 0 12px 36px rgba(0,0,0,0.5) !important; }
+      .email-title { color: #ffffff !important; }
+      .email-desc { color: #cbd5e1 !important; }
+      .email-label { color: #ffffff !important; }
+      .email-val { color: #cbd5e1 !important; }
+      .email-detail-row { color: #e2e8f0 !important; }
+      .email-notice { color: #94a3b8 !important; }
+      .email-subnotice { color: #94a3b8 !important; }
+      .email-link { color: #60a5fa !important; }
+      .email-code-box { background-color: #241c08 !important; border-color: #cca01d !important; color: #facc15 !important; }
+      .email-table-card { background-color: #161c28 !important; border-color: #232b3e !important; }
+      .email-row-alt { background-color: #1a202c !important; border-bottom-color: #232b3e !important; }
+      .email-row-norm { border-bottom-color: #232b3e !important; }
+      .email-footer-bg { background-color: #0b0d13 !important; border-top-color: #1a1e2b !important; }
+      .email-footer-text { color: #64748b !important; }
+    }
+    [data-ogsc] body, [data-ogsc] .email-bg { background-color: #0b0d14 !important; }
+    [data-ogsc] .email-card { background-color: #12151e !important; border-color: #1f2333 !important; }
+    [data-ogsc] .email-title { color: #ffffff !important; }
+    [data-ogsc] .email-desc { color: #cbd5e1 !important; }
+    [data-ogsc] .email-label { color: #ffffff !important; }
+    [data-ogsc] .email-val { color: #cbd5e1 !important; }
+    [data-ogsc] .email-detail-row { color: #e2e8f0 !important; }
+    [data-ogsc] .email-notice { color: #94a3b8 !important; }
+    [data-ogsc] .email-subnotice { color: #94a3b8 !important; }
+    [data-ogsc] .email-link { color: #60a5fa !important; }
+    [data-ogsc] .email-code-box { background-color: #241c08 !important; border-color: #cca01d !important; color: #facc15 !important; }
+    [data-ogsc] .email-table-card { background-color: #161c28 !important; border-color: #232b3e !important; }
+    [data-ogsc] .email-row-alt { background-color: #1a202c !important; }
+    [data-ogsc] .email-footer-bg { background-color: #0b0d13 !important; border-top-color: #1a1e2b !important; }
+    [data-ogsc] .email-footer-text { color: #64748b !important; }
+  </style>
 </head>
-<body style="margin:0; padding:0; background-color:#f8f9fa; font-family:'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;">
-  <table width="100%" border="0" cellspacing="0" cellpadding="0" style="background-color:#f8f9fa; padding:40px 0;">
+<body class="email-bg" style="margin:0; padding:0; background-color:#f1f5f9; font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; -webkit-font-smoothing:antialiased;">
+  <table width="100%" border="0" cellspacing="0" cellpadding="0" class="email-bg" style="background-color:#f1f5f9; padding:32px 14px;">
      <tr>
       <td align="center">
-        <table width="600" border="0" cellspacing="0" cellpadding="0" style="background-color:#ffffff; border-radius:12px; overflow:hidden; box-shadow:0 4px 16px rgba(0,0,0,0.04);">
-          <!-- Header -->
+        <!-- Main Card: White in Light Theme, Dark Charcoal in Dark Theme -->
+        <table width="100%" border="0" cellspacing="0" cellpadding="0" class="email-card" style="max-width:540px; background-color:#ffffff; border-radius:16px; overflow:hidden; border:1px solid #e2e8f0; box-shadow:0 8px 30px rgba(0,0,0,0.06);">
+          <!-- Golden Brand Banner -->
           <tr>
-            <td style="background-color:#0085d0; padding:30px 40px; text-align:center;">
-              <h1 style="color:#ffffff; margin:0; font-size:28px; letter-spacing:1px; font-weight: 900; text-transform: uppercase;">${siteName}</h1>
+            <td align="center" style="background-color:#b58117; padding:26px 20px; text-align:center;">
+              ${siteLogo ? `<img src="${siteLogo}" alt="${siteName}" style="max-height:38px; max-width:220px; display:block; margin:0 auto 6px; object-fit:contain;" />` : ''}
+              <h1 style="color:#ffffff; margin:0; font-size:22px; letter-spacing:1.5px; font-weight:900; text-transform:uppercase; font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">${siteName}</h1>
             </td>
           </tr>
           <!-- Body -->
           <tr>
-            <td style="padding:40px;">
+            <td style="padding:34px 28px 28px;">
               ${innerContentHtml}
             </td>
           </tr>
           <!-- Footer -->
           <tr>
-            <td style="background-color:#f1f5f9; padding:24px 40px; text-align:center;">
-              <p style="margin:0; color:#64748b; font-size:13px; line-height:1.6;">
+            <td class="email-footer-bg" style="background-color:#f8fafc; padding:20px 28px; text-align:center; border-top:1px solid #e2e8f0;">
+              <p class="email-footer-text" style="margin:0; color:#64748b; font-size:12px; line-height:1.6; font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
                 &copy; ${new Date().getFullYear()} ${siteName}. All rights reserved.<br>
                 You received this email because you are registered on ${siteName}.
               </p>
@@ -278,7 +323,7 @@ export async function sendAdminNotificationEmail({ subject, title, details }) {
 }
 
 // ==========================================
-// 1. TRANSACTION EMAIL TEMPLATE (DARK + GOLD)
+// 1. TRANSACTION EMAIL TEMPLATE (DUAL-THEME LIGHT/DARK + GOLD)
 // ==========================================
 
 export function renderDarkGoldTransactionEmail({
@@ -296,8 +341,8 @@ export function renderDarkGoldTransactionEmail({
   const detailsHtml = details
     .map(
       (item) => `
-        <div style="margin: 8px 0; color: #e2e8f0; font-size: 15px; line-height: 1.5;">
-          <strong style="color: #ffffff;">${item.label}:</strong> <span style="${item.style || 'color: #ffffff;'}">${item.value}</span>
+        <div class="email-detail-row" style="margin: 9px 0; color: #334155; font-size: 15px; line-height: 1.5; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
+          <strong class="email-label" style="color: #0f172a; font-weight: 700;">${item.label}:</strong> <span class="email-val" style="${item.style || 'color: #334155;'}">${item.value}</span>
         </div>`
     )
     .join('');
@@ -307,15 +352,49 @@ export function renderDarkGoldTransactionEmail({
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="light dark">
+  <meta name="supported-color-schemes" content="light dark">
   <title>${title}</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      supported-color-schemes: light dark;
+    }
+    @media (prefers-color-scheme: dark) {
+      body, .email-bg { background-color: #0b0d14 !important; }
+      .email-card { background-color: #12151e !important; border-color: #1f2333 !important; box-shadow: 0 12px 36px rgba(0,0,0,0.5) !important; }
+      .email-title { color: #ffffff !important; }
+      .email-desc { color: #cbd5e1 !important; }
+      .email-label { color: #ffffff !important; }
+      .email-val { color: #cbd5e1 !important; }
+      .email-detail-row { color: #e2e8f0 !important; }
+      .email-notice { color: #94a3b8 !important; }
+      .email-subnotice { color: #94a3b8 !important; }
+      .email-link { color: #60a5fa !important; }
+      .email-footer-bg { background-color: #0b0d13 !important; border-top-color: #1a1e2b !important; }
+      .email-footer-text { color: #64748b !important; }
+    }
+    [data-ogsc] body, [data-ogsc] .email-bg { background-color: #0b0d14 !important; }
+    [data-ogsc] .email-card { background-color: #12151e !important; border-color: #1f2333 !important; }
+    [data-ogsc] .email-title { color: #ffffff !important; }
+    [data-ogsc] .email-desc { color: #cbd5e1 !important; }
+    [data-ogsc] .email-label { color: #ffffff !important; }
+    [data-ogsc] .email-val { color: #cbd5e1 !important; }
+    [data-ogsc] .email-detail-row { color: #e2e8f0 !important; }
+    [data-ogsc] .email-notice { color: #94a3b8 !important; }
+    [data-ogsc] .email-subnotice { color: #94a3b8 !important; }
+    [data-ogsc] .email-link { color: #60a5fa !important; }
+    [data-ogsc] .email-footer-bg { background-color: #0b0d13 !important; border-top-color: #1a1e2b !important; }
+    [data-ogsc] .email-footer-text { color: #64748b !important; }
+  </style>
 </head>
-<body style="margin:0; padding:0; background-color:#0b0d14; font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; -webkit-font-smoothing:antialiased;">
-  <table width="100%" border="0" cellspacing="0" cellpadding="0" style="background-color:#0b0d14; padding:32px 14px;">
+<body class="email-bg" style="margin:0; padding:0; background-color:#f1f5f9; font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; -webkit-font-smoothing:antialiased;">
+  <table width="100%" border="0" cellspacing="0" cellpadding="0" class="email-bg" style="background-color:#f1f5f9; padding:32px 14px;">
     <tr>
       <td align="center">
-        <!-- Main Dark Card -->
-        <table width="100%" border="0" cellspacing="0" cellpadding="0" style="max-width:520px; background-color:#11131a; border-radius:16px; overflow:hidden; border:1px solid #1f2333; box-shadow:0 12px 36px rgba(0,0,0,0.45);">
-          <!-- Gold Banner -->
+        <!-- Main Card: White in Light Theme, Dark Charcoal in Dark Theme -->
+        <table width="100%" border="0" cellspacing="0" cellpadding="0" class="email-card" style="max-width:520px; background-color:#ffffff; border-radius:16px; overflow:hidden; border:1px solid #e2e8f0; box-shadow:0 8px 30px rgba(0,0,0,0.06);">
+          <!-- Golden Brand Header Banner -->
           <tr>
             <td align="center" style="background-color:#b58117; padding:26px 20px; text-align:center;">
               ${siteLogo ? `<img src="${siteLogo}" alt="${siteName}" style="max-height:38px; max-width:220px; display:block; margin:0 auto 6px; object-fit:contain;" />` : ''}
@@ -326,11 +405,11 @@ export function renderDarkGoldTransactionEmail({
           </tr>
           <!-- Content Body -->
           <tr>
-            <td style="padding:34px 28px 28px; text-align:left; color:#ffffff;">
-              <h1 style="color:#ffffff; font-size:24px; font-weight:700; margin:0 0 16px 0; line-height:1.3; font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
+            <td style="padding:34px 28px 28px; text-align:left;">
+              <h1 class="email-title" style="color:#0f172a; font-size:24px; font-weight:700; margin:0 0 16px 0; line-height:1.3; font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
                 ${title}
               </h1>
-              <p style="color:#cbd5e1; font-size:15px; line-height:1.6; margin:0 0 24px 0;">
+              <p class="email-desc" style="color:#334155; font-size:15px; line-height:1.6; margin:0 0 24px 0; font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
                 ${messageHtml}
               </p>
 
@@ -341,18 +420,18 @@ export function renderDarkGoldTransactionEmail({
 
               <!-- Action Button -->
               <div style="margin:28px 0 24px 0; text-align:center;">
-                <a href="${buttonUrl}" target="_blank" style="display:inline-block; background-color:#b58117; color:#ffffff; font-size:15px; font-weight:700; text-decoration:none; padding:13px 34px; border-radius:8px; box-shadow:0 4px 14px rgba(181, 129, 23, 0.4); text-align:center;">
+                <a href="${buttonUrl}" target="_blank" style="display:inline-block; background-color:#b58117; color:#ffffff; font-size:15px; font-weight:700; text-decoration:none; padding:13px 36px; border-radius:8px; box-shadow:0 4px 14px rgba(181, 129, 23, 0.4); text-align:center; font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
                   ${buttonText}
                 </a>
               </div>
 
               <!-- Security Notice with Working Links -->
-              <p style="color:#94a3b8; font-size:13px; line-height:1.6; margin:22px 0 10px 0;">
-                If you don't recognize this activity, please <a href="${resetPasswordUrl}" target="_blank" style="color:#60a5fa; text-decoration:underline; font-weight:600;">reset your password</a> and contact <a href="${supportUrl}" target="_blank" style="color:#60a5fa; text-decoration:underline; font-weight:600;">customer support</a> immediately.
+              <p class="email-notice" style="color:#64748b; font-size:13px; line-height:1.6; margin:22px 0 10px 0; font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
+                If you don't recognize this activity, please <a href="${resetPasswordUrl}" target="_blank" class="email-link" style="color:#2563eb; text-decoration:underline; font-weight:600;">reset your password</a> and contact <a href="${supportUrl}" target="_blank" class="email-link" style="color:#2563eb; text-decoration:underline; font-weight:600;">customer support</a> immediately.
               </p>
 
               ${subNoticeText ? `
-              <p style="color:#64748b; font-size:12px; line-height:1.5; margin:10px 0 0 0;">
+              <p class="email-subnotice" style="color:#64748b; font-size:12px; line-height:1.5; margin:10px 0 0 0; font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
                 ${subNoticeText}
               </p>
               ` : ''}
@@ -360,8 +439,8 @@ export function renderDarkGoldTransactionEmail({
           </tr>
           <!-- Footer -->
           <tr>
-            <td style="padding:16px 24px; background-color:#0b0d13; text-align:center; border-top:1px solid #1a1e2b;">
-              <p style="margin:0; color:#64748b; font-size:12px; line-height:1.5;">
+            <td class="email-footer-bg" style="padding:16px 24px; background-color:#f8fafc; text-align:center; border-top:1px solid #e2e8f0;">
+              <p class="email-footer-text" style="margin:0; color:#64748b; font-size:12px; line-height:1.5; font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
                 &copy; ${new Date().getFullYear()} ${siteName}. All rights reserved.
               </p>
             </td>
@@ -373,6 +452,8 @@ export function renderDarkGoldTransactionEmail({
 </body>
 </html>`;
 }
+
+export const renderDualThemeTransactionEmail = renderDarkGoldTransactionEmail;
 
 // ==========================================
 // 2. DEPOSIT EMAIL NOTIFICATIONS
@@ -408,7 +489,7 @@ export const sendDepositApprovedEmail = async ({ user, deposit }) => {
       details.push({
         label: 'Credited Wallet',
         value: deposit.targetWalletLabel,
-        style: 'color: #38bdf8; font-weight: 600;'
+        style: 'color: #0284c7; font-weight: 600;'
       });
     }
 
@@ -416,7 +497,7 @@ export const sendDepositApprovedEmail = async ({ user, deposit }) => {
       siteName,
       siteLogo,
       title: 'Deposit Activated',
-      messageHtml: `You've successfully deposited <strong style="color: #ffffff;">${amountFormatted} ${currency}</strong> into your account.`,
+      messageHtml: `You've successfully deposited <strong class="email-label" style="color: #0f172a;">${amountFormatted} ${currency}</strong> into your account.`,
       details,
       buttonText: 'Visit Your Dashboard',
       buttonUrl: dashboardUrl,
@@ -454,8 +535,8 @@ export const sendDepositRejectedEmail = async ({ user, deposit, reason }) => {
     const details = [
       { label: 'Deposit Amount', value: amountFormatted },
       { label: 'Deposit Currency', value: currency },
-      { label: 'Deposit Status', value: 'Rejected', style: 'color: #f87171; font-weight: 700;' },
-      { label: 'Reason', value: reason || 'Deposit verification failed or unconfirmed blockchain transaction', style: 'color: #94a3b8;' }
+      { label: 'Deposit Status', value: 'Rejected', style: 'color: #dc2626; font-weight: 700;' },
+      { label: 'Reason', value: reason || 'Deposit verification failed or unconfirmed blockchain transaction', style: 'color: #64748b;' }
     ];
 
     const html = renderDarkGoldTransactionEmail({
@@ -515,7 +596,7 @@ export const sendWithdrawalApprovedEmail = async ({ user, withdrawal }) => {
       details.push({
         label: 'Destination Address',
         value: withdrawal.walletAddress,
-        style: 'color: #e2e8f0; font-family: monospace; font-size: 13px; word-break: break-all;'
+        style: 'color: #475569; font-family: monospace; font-size: 13px; word-break: break-all;'
       });
     }
 
@@ -523,7 +604,7 @@ export const sendWithdrawalApprovedEmail = async ({ user, withdrawal }) => {
       siteName,
       siteLogo,
       title: 'Withdrawal Successful',
-      messageHtml: `You've successfully withdrawn <strong style="color: #ffffff;">${amountFormatted} ${currency}</strong> from your account.`,
+      messageHtml: `You've successfully withdrawn <strong class="email-label" style="color: #0f172a;">${amountFormatted} ${currency}</strong> from your account.`,
       details,
       buttonText: 'Visit Your Dashboard',
       buttonUrl: dashboardUrl,
@@ -561,8 +642,8 @@ export const sendWithdrawalRejectedEmail = async ({ user, withdrawal, reason }) 
     const details = [
       { label: 'Refunded Amount', value: amountFormatted },
       { label: 'Withdrawal Currency', value: currency },
-      { label: 'Withdrawal Status', value: 'Rejected & Refunded', style: 'color: #f87171; font-weight: 700;' },
-      { label: 'Reason', value: reason || 'Destination address verification or security check', style: 'color: #94a3b8;' }
+      { label: 'Withdrawal Status', value: 'Rejected & Refunded', style: 'color: #dc2626; font-weight: 700;' },
+      { label: 'Reason', value: reason || 'Destination address verification or security check', style: 'color: #64748b;' }
     ];
 
     const html = renderDarkGoldTransactionEmail({
@@ -591,7 +672,7 @@ export const sendWithdrawalRejectedEmail = async ({ user, withdrawal, reason }) 
 };
 
 // ==========================================
-// 3. REFERRAL COMMISSION EMAIL NOTIFICATIONS
+// 4. REFERRAL COMMISSION EMAIL NOTIFICATIONS
 // ==========================================
 
 export const sendReferralCommissionEmail = async ({ inviter, referee, commissionAmount, depositAmount, level = 1, percentage = 10 }) => {
@@ -605,36 +686,36 @@ export const sendReferralCommissionEmail = async ({ inviter, referee, commission
     const depFormatted = parseFloat(depositAmount || 0).toFixed(2);
 
     const html = `
-      <h2 style="color: #0f172a; font-size: 20px; font-weight: 800; margin-top: 0; margin-bottom: 16px;">Referral Commission Received</h2>
-      <p style="color: #334155; font-size: 14px; line-height: 1.6; margin-bottom: 16px;">Hi <b>${inviterName}</b>,</p>
-      <p style="color: #334155; font-size: 14px; line-height: 1.6; margin-bottom: 20px;">Great news! You have earned a referral commission from an active deposit made by a user in your referral network.</p>
-      <table width="100%" cellpadding="12" cellspacing="0" style="border-collapse: collapse; margin: 20px 0; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 13px; font-family: sans-serif;">
+      <h2 class="email-title" style="color: #0f172a; font-size: 22px; font-weight: 700; margin-top: 0; margin-bottom: 16px; font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">Referral Commission Received</h2>
+      <p class="email-desc" style="color: #334155; font-size: 15px; line-height: 1.6; margin-bottom: 16px; font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">Hi <b class="email-label" style="color: #0f172a;">${inviterName}</b>,</p>
+      <p class="email-desc" style="color: #334155; font-size: 15px; line-height: 1.6; margin-bottom: 20px; font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">Great news! You have earned a referral commission from an active deposit made by a user in your referral network.</p>
+      <table width="100%" cellpadding="12" cellspacing="0" class="email-table-card" style="border-collapse: collapse; margin: 20px 0; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 14px; font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background-color: #ffffff;">
         <tbody>
-          <tr style="background-color: #f8fafc; border-bottom: 1px solid #e2e8f0;">
-            <td style="font-weight: 700; color: #475569; width: 45%;">Commission Earned</td>
+          <tr class="email-row-alt" style="background-color: #f8fafc; border-bottom: 1px solid #e2e8f0;">
+            <td class="email-desc" style="font-weight: 700; color: #475569; width: 45%;">Commission Earned</td>
             <td style="font-weight: 800; color: #10b981;">+$${commFormatted}</td>
           </tr>
-          <tr style="border-bottom: 1px solid #e2e8f0;">
-            <td style="font-weight: 700; color: #475569;">Referred User</td>
-            <td style="font-weight: 700; color: #0f172a;">${refereeIdentifier}</td>
+          <tr class="email-row-norm" style="border-bottom: 1px solid #e2e8f0;">
+            <td class="email-desc" style="font-weight: 700; color: #475569;">Referred User</td>
+            <td class="email-label" style="font-weight: 700; color: #0f172a;">${refereeIdentifier}</td>
           </tr>
-          <tr style="background-color: #f8fafc; border-bottom: 1px solid #e2e8f0;">
-            <td style="font-weight: 700; color: #475569;">Deposit Amount</td>
-            <td style="font-weight: 700; color: #0f172a;">$${depFormatted}</td>
+          <tr class="email-row-alt" style="background-color: #f8fafc; border-bottom: 1px solid #e2e8f0;">
+            <td class="email-desc" style="font-weight: 700; color: #475569;">Deposit Amount</td>
+            <td class="email-label" style="font-weight: 700; color: #0f172a;">$${depFormatted}</td>
           </tr>
-          <tr style="border-bottom: 1px solid #e2e8f0;">
-            <td style="font-weight: 700; color: #475569;">Commission Tier</td>
-            <td style="font-weight: 700; color: #0085d0;">Level ${level} (${percentage}%)</td>
+          <tr class="email-row-norm" style="border-bottom: 1px solid #e2e8f0;">
+            <td class="email-desc" style="font-weight: 700; color: #475569;">Commission Tier</td>
+            <td style="font-weight: 700; color: #b58117;">Level ${level} (${percentage}%)</td>
           </tr>
-          <tr style="background-color: #f8fafc; border-bottom: 1px solid #e2e8f0;">
-            <td style="font-weight: 700; color: #475569;">Credit Status</td>
+          <tr class="email-row-alt" style="background-color: #f8fafc;">
+            <td class="email-desc" style="font-weight: 700; color: #475569;">Credit Status</td>
             <td style="font-weight: 700; color: #10b981;">Credited to Balance</td>
           </tr>
         </tbody>
       </table>
-      <p style="color: #334155; font-size: 14px; line-height: 1.6; margin-top: 16px;">This bonus has been added directly to your account balance and is immediately available for withdrawal or reinvestment.</p>
-      <p style="color: #64748b; font-size: 13px; line-height: 1.6; margin-top: 12px;">Keep sharing your referral link to earn even more passive rewards from your network!</p>
-      <p style="color: #0f172a; font-weight: 700; margin-top: 20px;">Thank you for partnering with ${siteName}.</p>
+      <p class="email-desc" style="color: #334155; font-size: 14px; line-height: 1.6; margin-top: 16px; font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">This bonus has been added directly to your account balance and is immediately available for withdrawal or reinvestment.</p>
+      <p class="email-notice" style="color: #64748b; font-size: 13px; line-height: 1.6; margin-top: 12px; font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">Keep sharing your referral link to earn even more passive rewards from your network!</p>
+      <p class="email-title" style="color: #0f172a; font-weight: 700; margin-top: 20px; font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">Thank you for partnering with ${siteName}.</p>
     `;
 
     return await sendEmail({
