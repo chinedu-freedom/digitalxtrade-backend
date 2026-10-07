@@ -160,8 +160,8 @@ const formatUser = (user) => {
   };
 };
 
-// GET /api/public/logo-favicon
-router.get('/public/logo-favicon', async (req, res) => {
+// GET /api/public/logo-favicon & /api/admin/logo-favicon & /logo-favicon
+router.get(['/public/logo-favicon', '/admin/logo-favicon', '/logo-favicon'], async (req, res) => {
   try {
     let settings = await prisma.settings.findFirst();
     return res.json({
@@ -185,7 +185,7 @@ router.get('/public/logo-favicon', async (req, res) => {
 });
 
 // GET /api/public/settings
-router.get('/public/settings', async (req, res) => {
+router.get(['/public/settings', '/admin/settings', '/settings'], async (req, res) => {
   try {
     let settings = await prisma.settings.findFirst();
     return res.json({
@@ -2072,7 +2072,7 @@ router.get('/admin/investments/expiring', async (req, res) => {
 });
 
 // GET /api/admin/staking-plans (Real PostgreSQL Data)
-router.get(['/admin/staking-plans', '/admin/investments', '/admin/plan/manage'], async (req, res) => {
+router.get(['/admin/staking-plans', '/staking-plans', '/admin/investments', '/investments', '/admin/plan/manage', '/staking/plans'], async (req, res) => {
   try {
     const dbPlans = await prisma.investmentPlan.findMany({
       orderBy: { minAmount: 'asc' }
