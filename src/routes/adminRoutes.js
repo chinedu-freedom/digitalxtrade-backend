@@ -105,6 +105,9 @@ const formatUser = (user) => {
     secret_question: user.secretQuestion,
     secretAnswer: user.secretAnswer,
     secret_answer: user.secretAnswer,
+    maxDailyWithdraw: user.maxDailyWithdraw !== null && user.maxDailyWithdraw !== undefined ? Number(user.maxDailyWithdraw) : 50000,
+    max_daily_withdraw: user.maxDailyWithdraw !== null && user.maxDailyWithdraw !== undefined ? Number(user.maxDailyWithdraw) : 50000,
+    maxDailyWithdrawal: user.maxDailyWithdraw !== null && user.maxDailyWithdraw !== undefined ? Number(user.maxDailyWithdraw) : 50000,
     referralCode: user.referralCode,
     isEmailVerified: user.isEmailVerified,
     is_email_verified: user.isEmailVerified,
@@ -638,6 +641,7 @@ const handleAdminUserUpdate = async (req, res) => {
       is_active, is_suspended, isSuspended,
       email_verified, isEmailVerified,
       password,
+      maxDailyWithdraw, max_daily_withdraw, maxDailyWithdrawal, max_daily_withdrawal,
     } = req.body;
 
     const dataToUpdate = {};
@@ -654,6 +658,10 @@ const handleAdminUserUpdate = async (req, res) => {
     if (litecoinAddress !== undefined || ltc_address !== undefined) dataToUpdate.litecoinAddress = litecoinAddress ?? ltc_address;
     if (secretQuestion !== undefined || secret_question !== undefined) dataToUpdate.secretQuestion = secretQuestion ?? secret_question;
     if (secretAnswer !== undefined || secret_answer !== undefined) dataToUpdate.secretAnswer = secretAnswer ?? secret_answer;
+    const maxDailyVal = maxDailyWithdraw ?? max_daily_withdraw ?? maxDailyWithdrawal ?? max_daily_withdrawal;
+    if (maxDailyVal !== undefined && maxDailyVal !== null) {
+      dataToUpdate.maxDailyWithdraw = parseFloat(maxDailyVal) || 0;
+    }
 
     if (is_active !== undefined) {
       dataToUpdate.isSuspended = !Boolean(is_active);

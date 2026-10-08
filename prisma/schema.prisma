@@ -38,6 +38,7 @@ model User {
   mobile              String?
   country             String?
   adminNote           String?
+  maxDailyWithdraw    Float?           @default(50000)
 
   bitcoinAddress      String?          @default("")
   usdtTrc20Address    String?          @default("")

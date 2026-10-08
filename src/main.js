@@ -317,6 +317,7 @@ app.get('/api/withdraw', async (req, res) => {
       data: {
         accountBalance: totalUserBal,
         pendingWithdrawals: totalPendingSum,
+        maxDailyWithdraw: user ? (user.maxDailyWithdraw !== null && user.maxDailyWithdraw !== undefined ? parseFloat(user.maxDailyWithdraw) : 50000.00) : 50000.00,
         currencies,
         transactions: user ? user.withdrawals : []
       }
@@ -449,8 +450,36 @@ app.post('/api/withdraw', async (req, res) => {
     if (numAmount < minWithdrawal) {
       return res.status(400).json({
         success: false,
-        message: `Minimum withdrawal is $${minWithdrawal.toFixed(2)}.`
+        message: `Minimum withdrawal is ${minWithdrawal.toFixed(2)}.`
       });
+    }
+
+    // Enforce User Max Daily Withdrawal Limit
+    const userMaxDaily = user.maxDailyWithdraw !== null && user.maxDailyWithdraw !== undefined
+      ? parseFloat(user.maxDailyWithdraw)
+      : 50000.00;
+
+    if (userMaxDaily > 0) {
+      const startOfDay = new Date();
+      startOfDay.setHours(0, 0, 0, 0);
+
+      const todayWithdrawals = await prisma.withdrawal.findMany({
+        where: {
+          userId: user.id,
+          createdAt: { gte: startOfDay },
+          status: { not: 'REJECTED' }
+        }
+      });
+
+      const todayTotal = todayWithdrawals.reduce((sum, w) => sum + parseFloat(w.amount || 0), 0);
+
+      if (todayTotal + numAmount > userMaxDaily) {
+        const remainingDaily = Math.max(0, userMaxDaily - todayTotal);
+        return res.status(400).json({
+          success: false,
+          message: `Daily withdrawal limit of ${userMaxDaily.toLocaleString('en-US', { minimumFractionDigits: 2 })} exceeded. You have ${remainingDaily.toLocaleString('en-US', { minimumFractionDigits: 2 })} remaining today.`
+        });
+      }
     }
 
     // Determine target wallet address
