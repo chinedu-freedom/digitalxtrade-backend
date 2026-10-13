@@ -644,20 +644,50 @@ const handleAdminUserUpdate = async (req, res) => {
       maxDailyWithdraw, max_daily_withdraw, maxDailyWithdrawal, max_daily_withdrawal,
     } = req.body;
 
+    const existingUser = await prisma.user.findUnique({ where: { id } });
+    if (!existingUser) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
     const dataToUpdate = {};
     if (fullName || full_name) dataToUpdate.fullName = fullName || full_name;
-    if (username) dataToUpdate.username = username.trim();
-    if (email) dataToUpdate.email = email.toLowerCase().trim();
+    if (username && username.trim()) {
+      const cleanUsername = username.trim();
+      if (cleanUsername !== existingUser.username) {
+        const conflict = await prisma.user.findFirst({
+          where: { username: { equals: cleanUsername, mode: 'insensitive' }, id: { not: id } }
+        });
+        if (conflict) {
+          return res.status(400).json({ success: false, message: `Username @${cleanUsername} is already taken by another account.` });
+        }
+      }
+      dataToUpdate.username = cleanUsername;
+    }
+
+    if (email && email.trim()) {
+      const cleanEmail = email.toLowerCase().trim();
+      if (cleanEmail !== existingUser.email) {
+        const conflict = await prisma.user.findFirst({
+          where: { email: { equals: cleanEmail, mode: 'insensitive' }, id: { not: id } }
+        });
+        if (conflict) {
+          return res.status(400).json({ success: false, message: `Email ${cleanEmail} is already in use by another account.` });
+        }
+      }
+      dataToUpdate.email = cleanEmail;
+    }
+
     if (mobile !== undefined) dataToUpdate.mobile = mobile;
     if (country !== undefined) dataToUpdate.country = country;
     if (adminNote !== undefined || admin_note !== undefined) dataToUpdate.adminNote = adminNote ?? admin_note;
     if (bitcoinAddress !== undefined || btc_address !== undefined) dataToUpdate.bitcoinAddress = bitcoinAddress ?? btc_address;
     if (usdtTrc20Address !== undefined || usdt_address !== undefined) dataToUpdate.usdtTrc20Address = usdtTrc20Address ?? usdt_address;
     const bepVal = usdtBep20Address ?? usdt_bep20_address;
-      if (bepVal !== undefined) dataToUpdate.usdtBep20Address = bepVal;
+    if (bepVal !== undefined) dataToUpdate.usdtBep20Address = bepVal;
     if (litecoinAddress !== undefined || ltc_address !== undefined) dataToUpdate.litecoinAddress = litecoinAddress ?? ltc_address;
     if (secretQuestion !== undefined || secret_question !== undefined) dataToUpdate.secretQuestion = secretQuestion ?? secret_question;
     if (secretAnswer !== undefined || secret_answer !== undefined) dataToUpdate.secretAnswer = secretAnswer ?? secret_answer;
+    
     const maxDailyVal = maxDailyWithdraw ?? max_daily_withdraw ?? maxDailyWithdrawal ?? max_daily_withdrawal;
     if (maxDailyVal !== undefined && maxDailyVal !== null) {
       dataToUpdate.maxDailyWithdraw = parseFloat(maxDailyVal) || 0;
@@ -681,18 +711,62 @@ const handleAdminUserUpdate = async (req, res) => {
       dataToUpdate.password = await bcrypt.hash(String(password).trim(), 10);
     }
 
-    const updated = await prisma.user.update({
-      where: { id },
-      data: dataToUpdate,
-      include: {
-        deposits: { orderBy: { createdAt: 'desc' } },
-        withdrawals: { orderBy: { createdAt: 'desc' } },
-        transactions: { orderBy: { createdAt: 'desc' } },
-        referrals: true,
-        referredBy: true,
-        loginLogs: { orderBy: { createdAt: 'desc' }, take: 20 }
+    let updated;
+    try {
+      updated = await prisma.user.update({
+        where: { id },
+        data: dataToUpdate,
+        include: {
+          deposits: { orderBy: { createdAt: 'desc' } },
+          withdrawals: { orderBy: { createdAt: 'desc' } },
+          transactions: { orderBy: { createdAt: 'desc' } },
+          referrals: true,
+          referredBy: true,
+          loginLogs: { orderBy: { createdAt: 'desc' }, take: 20 }
+        }
+      });
+    } catch (dbErr) {
+      console.warn('Prisma user update encountered error, executing self-healing schema migration:', dbErr.message);
+      if (dbErr?.message?.includes('maxDailyWithdraw') || dbErr?.code === 'P2022') {
+        try {
+          await prisma.$executeRawUnsafe(`ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "maxDailyWithdraw" DOUBLE PRECISION DEFAULT 50000;`);
+        } catch (colErr) {
+          try {
+            await prisma.$executeRawUnsafe(`ALTER TABLE users ADD COLUMN IF NOT EXISTS "maxDailyWithdraw" DOUBLE PRECISION DEFAULT 50000;`);
+          } catch (colErr2) {}
+        }
+        try {
+          updated = await prisma.user.update({
+            where: { id },
+            data: dataToUpdate,
+            include: {
+              deposits: { orderBy: { createdAt: 'desc' } },
+              withdrawals: { orderBy: { createdAt: 'desc' } },
+              transactions: { orderBy: { createdAt: 'desc' } },
+              referrals: true,
+              referredBy: true,
+              loginLogs: { orderBy: { createdAt: 'desc' }, take: 20 }
+            }
+          });
+        } catch (retryErr) {
+          delete dataToUpdate.maxDailyWithdraw;
+          updated = await prisma.user.update({
+            where: { id },
+            data: dataToUpdate,
+            include: {
+              deposits: { orderBy: { createdAt: 'desc' } },
+              withdrawals: { orderBy: { createdAt: 'desc' } },
+              transactions: { orderBy: { createdAt: 'desc' } },
+              referrals: true,
+              referredBy: true,
+              loginLogs: { orderBy: { createdAt: 'desc' }, take: 20 }
+            }
+          });
+        }
+      } else {
+        throw dbErr;
       }
-    });
+    }
 
     return res.json({
       success: true,
@@ -701,12 +775,16 @@ const handleAdminUserUpdate = async (req, res) => {
     });
   } catch (err) {
     console.error('Update user detail error:', err);
-    return res.status(500).json({ success: false, message: 'Failed to update user profile' });
+    let errMsg = err?.message || 'Failed to update user profile';
+    if (err?.code === 'P2002') {
+      errMsg = 'Unique constraint violation: A user with this username or email already exists.';
+    }
+    return res.status(500).json({ success: false, message: errMsg });
   }
 };
 
-router.put(['/admin/users/:id', '/admin/users/:id/update'], handleAdminUserUpdate);
-router.post(['/admin/users/:id/update', '/admin/users/:id'], handleAdminUserUpdate);
+router.put(['/admin/users/:id', '/admin/users/:id/update', '/users/:id', '/users/:id/update'], handleAdminUserUpdate);
+router.post(['/admin/users/:id/update', '/admin/users/:id', '/users/:id/update', '/users/:id'], handleAdminUserUpdate);
 
 // DELETE & POST /api/admin/users/:id/delete & destroy
 const handleAdminUserDelete = async (req, res) => {

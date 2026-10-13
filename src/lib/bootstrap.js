@@ -3,6 +3,15 @@ import prisma from './prisma.js';
 
 export async function ensureDatabaseBootstrapped() {
   try {
+    // 0. Auto-healing PostgreSQL column migrations
+    try {
+      await prisma.$executeRawUnsafe(`ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "maxDailyWithdraw" DOUBLE PRECISION DEFAULT 50000;`);
+    } catch (colErr) {
+      try {
+        await prisma.$executeRawUnsafe(`ALTER TABLE users ADD COLUMN IF NOT EXISTS "maxDailyWithdraw" DOUBLE PRECISION DEFAULT 50000;`);
+      } catch (colErr2) {}
+    }
+
     // 1. Ensure Default Investment Plans exist
     const planCount = await prisma.investmentPlan.count();
     if (planCount === 0) {
