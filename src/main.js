@@ -312,10 +312,16 @@ app.get('/api/withdraw', async (req, res) => {
       }
     ];
 
+    const userProfitBal = user ? parseFloat(user.profitBalance || 0) : 0.00;
+    const userDepositBal = user ? parseFloat(user.depositBalance || 0) : 0.00;
+
     return res.json({
       success: true,
       data: {
-        accountBalance: totalUserBal,
+        accountBalance: userProfitBal,
+        profitBalance: userProfitBal,
+        depositBalance: userDepositBal,
+        totalBalance: totalUserBal,
         pendingWithdrawals: totalPendingSum,
         maxDailyWithdraw: user ? (user.maxDailyWithdraw !== null && user.maxDailyWithdraw !== undefined ? parseFloat(user.maxDailyWithdraw) : 50000.00) : 50000.00,
         currencies,
@@ -426,23 +432,20 @@ app.post('/api/withdraw', async (req, res) => {
         return res.status(400).json({ success: false, message: 'Please enter a valid withdrawal amount.' });
       }
 
-      const chosenWallet = (walletType || wallet_type || 'profit').toLowerCase();
-      const depositBal = parseFloat(user.depositBalance || user.deposit_balance || 0);
       const profitBal = parseFloat(user.profitBalance || user.profit_balance || 0);
       const totalUserBal = parseFloat(user.balance || 0);
 
-      let availableWalletBal = chosenWallet === 'deposit' ? depositBal : profitBal;
-
-      // Fallback if balances were non-zero on main balance directly
-      if (depositBal + profitBal === 0 && totalUserBal > 0) {
+      // Withdrawals are strictly allowed only from profit balance
+      let availableWalletBal = profitBal;
+      // Fallback if legacy account had funds directly on balance without deposit sub-wallets
+      if (profitBal === 0 && totalUserBal > 0 && parseFloat(user.depositBalance || 0) === 0) {
         availableWalletBal = totalUserBal;
       }
 
       if (numAmount > availableWalletBal) {
-        const walletName = chosenWallet === 'deposit' ? 'Deposit Balance (Capital)' : 'Profit Balance (Earnings)';
         return res.status(400).json({
           success: false,
-          message: `Insufficient ${walletName} (${availableWalletBal.toFixed(2)}). You requested ${numAmount.toFixed(2)}.`
+          message: `Insufficient Withdrawable Profit Balance ($${availableWalletBal.toFixed(2)}). Withdrawals are only processed from your profit earnings. You requested $${numAmount.toFixed(2)}.`
         });
       }
 
@@ -498,25 +501,22 @@ app.post('/api/withdraw', async (req, res) => {
       });
     }
 
-    // Deduct user balance in PostgreSQL
-      const dataToDecrement = { balance: { decrement: numAmount } };
-      if (chosenWallet === 'deposit') {
-        dataToDecrement.depositBalance = { decrement: numAmount };
-      } else {
-        dataToDecrement.profitBalance = { decrement: numAmount };
-      }
+    // Deduct user balance strictly from profit balance and total balance
+    const dataToDecrement = {
+      balance: { decrement: numAmount },
+      profitBalance: { decrement: numAmount }
+    };
 
-      const updatedUser = await prisma.user.update({
-        where: { id: user.id },
-        data: dataToDecrement
-      });
+    const updatedUser = await prisma.user.update({
+      where: { id: user.id },
+      data: dataToDecrement
+    });
 
     const currencyName = currencyId === 'bitcoin' ? 'BTC' : currencyId === 'litecoin' ? 'LTC' : (currencyId === 'usdt_bep20' ? 'USDT-BEP20' : 'USDT-TRC20');
 
-    // Calculate 50% early withdrawal fee for Deposit Balance (Capital Wallet)
-    const feeRate = chosenWallet === 'deposit' ? 0.50 : 0.00;
-    const charge = numAmount * feeRate;
-    const netAmount = numAmount - charge;
+    // 0% platform fee on all profit balance withdrawals
+    const charge = 0.00;
+    const netAmount = numAmount;
 
     // Create persistent Withdrawal record
     const withdrawal = await prisma.withdrawal.create({
@@ -537,21 +537,14 @@ app.post('/api/withdraw', async (req, res) => {
         userId: user.id,
         type: 'WITHDRAWAL',
         amount: numAmount,
-        description: chosenWallet === 'deposit'
-          ? `Deposit balance withdrawal of ${numAmount.toFixed(2)} (50% fee: ${charge.toFixed(2)}, Net Payout: ${netAmount.toFixed(2)}) to ${targetAddress} (${currencyName})`
-          : `Profit balance withdrawal of ${numAmount.toFixed(2)} to ${targetAddress} (${currencyName})`,
+        description: `Profit balance withdrawal of ${numAmount.toFixed(2)} to ${targetAddress} (${currencyName})`,
         status: 'PENDING'
       }
     });
 
-
-    const successMsg = chosenWallet === 'deposit'
-      ? `Withdrawal request for ${numAmount.toFixed(2)} submitted! 50% capital withdrawal fee applied (Fee: ${charge.toFixed(2)}, Net Payout: ${netAmount.toFixed(2)}).`
-      : `Withdrawal request for ${numAmount.toFixed(2)} submitted successfully!`;
-
     return res.json({
       success: true,
-      message: successMsg,
+      message: `Withdrawal request for ${numAmount.toFixed(2)} submitted successfully!`,
       withdrawal,
       newBalance: updatedUser.balance
     });

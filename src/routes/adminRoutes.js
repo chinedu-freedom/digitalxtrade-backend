@@ -1240,11 +1240,12 @@ router.post('/admin/withdrawals/:id/reject', async (req, res) => {
       data: { status: 'REJECTED' }
     });
 
-    // Refund funds to user balance
+    // Refund funds to user balance and profit balance
     if (withdrawal.userId) {
       const field = getCurrencyField(withdrawal.currency);
       const updateData = {
-        balance: { increment: withdrawal.amount }
+        balance: { increment: withdrawal.amount },
+        profitBalance: { increment: withdrawal.amount }
       };
       if (field) {
         updateData[field] = { increment: withdrawal.amount };
