@@ -675,7 +675,7 @@ export const sendWithdrawalRejectedEmail = async ({ user, withdrawal, reason }) 
 // 4. REFERRAL COMMISSION EMAIL NOTIFICATIONS
 // ==========================================
 
-export const sendReferralCommissionEmail = async ({ inviter, referee, commissionAmount, depositAmount, level = 1, percentage = 10 }) => {
+export const sendReferralCommissionEmail = async ({ inviter, referee, commissionAmount, depositAmount, level = 1, percentage = 6 }) => {
   try {
     if (!inviter || !inviter.email) return;
     const settings = await prisma.settings.findFirst().catch(() => null);
