@@ -14,6 +14,7 @@ import {
 } from './lib/store.js';
 import { ensureDatabaseBootstrapped } from './lib/bootstrap.js';
 import { sendDepositEmail, sendWithdrawalEmail, sendReferralCommissionEmail } from './services/emailService.js';
+import { distributeReferralCommissions } from './services/referralService.js';
 
 dotenv.config();
 
@@ -793,6 +794,14 @@ app.post(['/api/deposit', '/api/deposits'], async (req, res) => {
         action: 'APPROVED'
       }).catch(e => console.error('Error sending balance deposit email:', e));
 
+      // Process Multi-Tier referral commissions across active upline
+      distributeReferralCommissions({
+        userId: user.id,
+        depositAmount: numAmount,
+        depositUser: user,
+        source: 'plan investment'
+      }).catch(e => console.error('Error distributing referral commission on plan activation:', e));
+
       return res.json({
         success: true,
         message: `Plan ${plan.name} activated successfully from account balance!`,
@@ -1046,38 +1055,14 @@ app.all(['/api/oxapay-webhook', '/oxapay-webhook'], async (req, res) => {
                 action: 'APPROVED'
               }).catch(e => console.error('Error sending OxaPay deposit email:', e));
 
-              // Process 10% referral commission for inviter
+              // Process Multi-Tier referral commissions across active upline
               try {
-                const inviter = depositUser.referredBy || (depositUser.referredById ? await prisma.user.findUnique({ where: { id: depositUser.referredById } }) : null);
-                if (inviter) {
-                  const commAmount = parseFloat((deposit.amount * 0.10).toFixed(2));
-                  if (commAmount > 0) {
-                    await prisma.user.update({
-                      where: { id: inviter.id },
-                      data: {
-                        balance: { increment: commAmount },
-                        referralCommissions: { increment: commAmount }
-                      }
-                    });
-                    await prisma.transaction.create({
-                      data: {
-                        userId: inviter.id,
-                        type: 'COMMISSION',
-                        amount: commAmount,
-                        description: `10% Referral Commission from @${depositUser.username || depositUser.fullName || 'referral'}'s deposit of ${deposit.amount.toFixed(2)}`,
-                        status: 'COMPLETED'
-                      }
-                    });
-                    sendReferralCommissionEmail({
-                      inviter,
-                      referee: depositUser,
-                      commissionAmount: commAmount,
-                      depositAmount: deposit.amount,
-                      level: 1,
-                      percentage: 10
-                    }).catch(e => console.error('Error sending OxaPay referral commission email:', e));
-                  }
-                }
+                await distributeReferralCommissions({
+                  userId: depositUser.id,
+                  depositAmount: deposit.amount,
+                  depositUser,
+                  source: 'crypto deposit'
+                });
               } catch (refErr) {
                 console.error('Error processing referral commission on OxaPay deposit:', refErr);
               }

@@ -4,6 +4,7 @@ import jwt from 'jsonwebtoken';
 import prisma from '../lib/prisma.js';
 import { companyDepositWallets, getActiveCompanyWallets, DEFAULT_COMPANY_WALLETS } from '../lib/store.js';
 import { sendDepositEmail, sendWithdrawalEmail, sendReferralCommissionEmail } from '../services/emailService.js';
+import { getReferralSettings, saveReferralSettings, distributeReferralCommissions } from '../services/referralService.js';
 
 const router = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET || 'digital-project-secret-key-2026';
@@ -954,42 +955,14 @@ router.post('/admin/deposits/:id/approve', async (req, res) => {
       }
     }
 
-    // Process 10% Referral Commission for upline inviter
+    // Process Multi-Tier Referral Commissions across active upline
     try {
-      const inviter = deposit.user?.referredBy || (deposit.user?.referredById ? await prisma.user.findUnique({ where: { id: deposit.user.referredById } }) : null);
-      if (inviter) {
-        const commissionRate = 0.10; // 10% Level 1 Referral Bonus
-        const commissionAmount = parseFloat((deposit.amount * commissionRate).toFixed(2));
-        if (commissionAmount > 0) {
-          await prisma.user.update({
-            where: { id: inviter.id },
-            data: {
-              balance: { increment: commissionAmount },
-              referralCommissions: { increment: commissionAmount }
-            }
-          });
-
-          await prisma.transaction.create({
-            data: {
-              userId: inviter.id,
-              type: 'COMMISSION',
-              amount: commissionAmount,
-              description: `10% Referral Commission from @${deposit.user.username || deposit.user.fullName || 'referral'}'s deposit of ${deposit.amount.toFixed(2)}`,
-              status: 'COMPLETED'
-            }
-          });
-
-          // Dispatch referral commission email to the referrer
-          sendReferralCommissionEmail({
-            inviter,
-            referee: deposit.user,
-            commissionAmount,
-            depositAmount: deposit.amount,
-            level: 1,
-            percentage: 10
-          }).catch(e => console.error('Error sending referral commission email:', e));
-        }
-      }
+      await distributeReferralCommissions({
+        userId: deposit.userId,
+        depositAmount: deposit.amount,
+        depositUser: deposit.user,
+        source: 'deposit'
+      });
     } catch (refErr) {
       console.error('Error processing referral commission on deposit approve:', refErr);
     }
@@ -2572,6 +2545,43 @@ const getOrCreateSiteSettings = async () => {
   }
   return s;
 };
+
+// ==========================================
+// REFERRAL COMMISSION SETTINGS (POSTGRESQL PERSISTENT)
+// ==========================================
+
+// GET /api/admin/referral-settings
+router.get(['/admin/referral-settings', '/referral-settings', '/public/referral-settings'], async (req, res) => {
+  try {
+    const settings = await getReferralSettings();
+    return res.json({
+      success: true,
+      referralSettings: settings
+    });
+  } catch (err) {
+    console.error('Fetch referral settings error:', err);
+    return res.status(500).json({ success: false, message: 'Failed to fetch referral settings' });
+  }
+});
+
+// POST /api/admin/referral-settings
+router.post(['/admin/referral-settings', '/referral-settings'], async (req, res) => {
+  try {
+    const { enabled, levels } = req.body;
+    const updated = await saveReferralSettings({
+      enabled: enabled !== undefined ? enabled : true,
+      levels: levels || []
+    });
+    return res.json({
+      success: true,
+      message: 'Referral commission settings updated successfully in database',
+      referralSettings: updated
+    });
+  } catch (err) {
+    console.error('Save referral settings error:', err);
+    return res.status(500).json({ success: false, message: 'Failed to save referral settings' });
+  }
+});
 
 // GET /api/admin/general-setting
 router.get('/admin/general-setting', async (req, res) => {

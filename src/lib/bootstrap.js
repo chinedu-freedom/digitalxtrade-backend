@@ -12,6 +12,25 @@ export async function ensureDatabaseBootstrapped() {
       } catch (colErr2) {}
     }
 
+    // 0b. Auto-healing referral_settings table
+    try {
+      await prisma.$executeRawUnsafe(`
+        CREATE TABLE IF NOT EXISTS referral_settings (
+          id VARCHAR(64) PRIMARY KEY,
+          enabled BOOLEAN DEFAULT true,
+          levels JSONB DEFAULT '[{"level": 1, "percent": 6}, {"level": 2, "percent": 2.5}, {"level": 3, "percent": 1}]'::jsonb,
+          "updatedAt" TIMESTAMP DEFAULT NOW()
+        );
+      `);
+      await prisma.$executeRawUnsafe(`
+        INSERT INTO referral_settings (id, enabled, levels, "updatedAt")
+        VALUES ('default', true, '[{"level": 1, "percent": 6}, {"level": 2, "percent": 2.5}, {"level": 3, "percent": 1}]'::jsonb, NOW())
+        ON CONFLICT (id) DO UPDATE SET levels = EXCLUDED.levels, "updatedAt" = NOW();
+      `);
+    } catch (refErr) {
+      console.warn('[bootstrap] Referral settings table check warning:', refErr.message);
+    }
+
     // 1. Ensure Default Investment Plans exist
     const planCount = await prisma.investmentPlan.count();
     if (planCount === 0) {
