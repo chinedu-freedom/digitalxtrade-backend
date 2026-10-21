@@ -10,7 +10,8 @@ import { initCron, runProfitPayouts } from './services/cronService.js';
 import {
   companyDepositWallets,
   getActiveCompanyWallets,
-  DEFAULT_COMPANY_WALLETS
+  DEFAULT_COMPANY_WALLETS,
+  getDepositWithdrawalConfig
 } from './lib/store.js';
 import { ensureDatabaseBootstrapped } from './lib/bootstrap.js';
 import { sendDepositEmail, sendWithdrawalEmail, sendReferralCommissionEmail } from './services/emailService.js';
@@ -270,6 +271,11 @@ app.get('/api/withdraw', async (req, res) => {
     const bepPending = getPendingForCurrency(['USDT-BEP20', 'USDT (BEP20)', 'BEP20']);
     const ltcPending = getPendingForCurrency(['LTC', 'LITECOIN']);
 
+    const dwConfig = getDepositWithdrawalConfig();
+    const payoutChargePercent = parseFloat(dwConfig.payoutCharge !== undefined ? dwConfig.payoutCharge : 5);
+    const minPayoutConfig = parseFloat(dwConfig.minPayout !== undefined ? dwConfig.minPayout : 10);
+    const maxPayoutConfig = parseFloat(dwConfig.maxPayout !== undefined ? dwConfig.maxPayout : 50000);
+
     const currencies = [
       {
         id: 'bitcoin',
@@ -278,8 +284,9 @@ app.get('/api/withdraw', async (req, res) => {
         available: btcBal,
         pending: btcPending,
         accountId: user?.bitcoinAddress || '',
-        minWithdrawal: 20.00,
-        fee: 0.00
+        minWithdrawal: minPayoutConfig > 0 ? minPayoutConfig : 20.00,
+        fee: payoutChargePercent,
+        feePercent: payoutChargePercent
       },
       {
         id: 'usdt_trc20',
@@ -288,8 +295,9 @@ app.get('/api/withdraw', async (req, res) => {
         available: trcBal,
         pending: trcPending,
         accountId: user?.usdtTrc20Address || '',
-        minWithdrawal: 10.00,
-        fee: 0.00
+        minWithdrawal: minPayoutConfig > 0 ? minPayoutConfig : 10.00,
+        fee: payoutChargePercent,
+        feePercent: payoutChargePercent
       },
       {
         id: 'usdt_bep20',
@@ -298,8 +306,9 @@ app.get('/api/withdraw', async (req, res) => {
         available: bepBal,
         pending: bepPending,
         accountId: user?.usdtBep20Address || '',
-        minWithdrawal: 10.00,
-        fee: 0.00
+        minWithdrawal: minPayoutConfig > 0 ? minPayoutConfig : 10.00,
+        fee: payoutChargePercent,
+        feePercent: payoutChargePercent
       },
       {
         id: 'litecoin',
@@ -308,8 +317,9 @@ app.get('/api/withdraw', async (req, res) => {
         available: ltcBal,
         pending: ltcPending,
         accountId: user?.litecoinAddress || '',
-        minWithdrawal: 15.00,
-        fee: 0.00
+        minWithdrawal: minPayoutConfig > 0 ? minPayoutConfig : 15.00,
+        fee: payoutChargePercent,
+        feePercent: payoutChargePercent
       }
     ];
 
@@ -324,7 +334,12 @@ app.get('/api/withdraw', async (req, res) => {
         depositBalance: userDepositBal,
         totalBalance: totalUserBal,
         pendingWithdrawals: totalPendingSum,
-        maxDailyWithdraw: user ? (user.maxDailyWithdraw !== null && user.maxDailyWithdraw !== undefined ? parseFloat(user.maxDailyWithdraw) : 50000.00) : 50000.00,
+        maxDailyWithdraw: user ? (user.maxDailyWithdraw !== null && user.maxDailyWithdraw !== undefined ? parseFloat(user.maxDailyWithdraw) : maxPayoutConfig) : maxPayoutConfig,
+        minPayout: minPayoutConfig,
+        maxPayout: maxPayoutConfig,
+        payoutCharge: payoutChargePercent,
+        feePercent: payoutChargePercent,
+        withdrawNotice: dwConfig.withdrawNotice || 'Withdrawals are processed promptly to your verified wallet address.',
         currencies,
         transactions: user ? user.withdrawals : []
       }
@@ -450,40 +465,57 @@ app.post('/api/withdraw', async (req, res) => {
         });
       }
 
-    const minWithdrawal = currencyId === 'bitcoin' ? 20.00 : currencyId === 'litecoin' ? 15.00 : 10.00;
+    const dwConfig = getDepositWithdrawalConfig();
+    const minPayoutConfig = parseFloat(dwConfig.minPayout !== undefined ? dwConfig.minPayout : 10);
+    const maxPayoutConfig = parseFloat(dwConfig.maxPayout !== undefined ? dwConfig.maxPayout : 50000);
+    const minWithdrawal = minPayoutConfig > 0 ? minPayoutConfig : 10.00;
+
     if (numAmount < minWithdrawal) {
       return res.status(400).json({
         success: false,
-        message: `Minimum withdrawal is ${minWithdrawal.toFixed(2)}.`
+        message: `Minimum withdrawal is $${minWithdrawal.toFixed(2)}.`
       });
     }
 
-    // Enforce User Max Daily Withdrawal Limit
+    if (maxPayoutConfig > 0 && numAmount > maxPayoutConfig) {
+      return res.status(400).json({
+        success: false,
+        message: `Maximum withdrawal per request is $${maxPayoutConfig.toFixed(2)}.`
+      });
+    }
+
+    // Enforce Daily Withdrawal Limits (Amount & Times)
+    const globalMaxDaily = parseFloat(dwConfig.maxDailyWithdrawalAmount || 50000);
     const userMaxDaily = user.maxDailyWithdraw !== null && user.maxDailyWithdraw !== undefined
       ? parseFloat(user.maxDailyWithdraw)
-      : 50000.00;
+      : globalMaxDaily;
+    const maxDailyTimes = parseInt(dwConfig.dailyWithdrawLimit || '5', 10);
 
-    if (userMaxDaily > 0) {
-      const startOfDay = new Date();
-      startOfDay.setHours(0, 0, 0, 0);
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
 
-      const todayWithdrawals = await prisma.withdrawal.findMany({
-        where: {
-          userId: user.id,
-          createdAt: { gte: startOfDay },
-          status: { not: 'REJECTED' }
-        }
-      });
-
-      const todayTotal = todayWithdrawals.reduce((sum, w) => sum + parseFloat(w.amount || 0), 0);
-
-      if (todayTotal + numAmount > userMaxDaily) {
-        const remainingDaily = Math.max(0, userMaxDaily - todayTotal);
-        return res.status(400).json({
-          success: false,
-          message: `Daily withdrawal limit of ${userMaxDaily.toLocaleString('en-US', { minimumFractionDigits: 2 })} exceeded. You have ${remainingDaily.toLocaleString('en-US', { minimumFractionDigits: 2 })} remaining today.`
-        });
+    const todayWithdrawals = await prisma.withdrawal.findMany({
+      where: {
+        userId: user.id,
+        createdAt: { gte: startOfDay },
+        status: { not: 'REJECTED' }
       }
+    });
+
+    if (maxDailyTimes > 0 && todayWithdrawals.length >= maxDailyTimes) {
+      return res.status(400).json({
+        success: false,
+        message: `Daily withdrawal request limit reached. Maximum ${maxDailyTimes} requests permitted per day.`
+      });
+    }
+
+    const todayTotal = todayWithdrawals.reduce((sum, w) => sum + parseFloat(w.amount || 0), 0);
+    if (userMaxDaily > 0 && (todayTotal + numAmount > userMaxDaily)) {
+      const remainingDaily = Math.max(0, userMaxDaily - todayTotal);
+      return res.status(400).json({
+        success: false,
+        message: `Daily withdrawal limit of $${userMaxDaily.toLocaleString('en-US', { minimumFractionDigits: 2 })} exceeded. You have $${remainingDaily.toLocaleString('en-US', { minimumFractionDigits: 2 })} remaining today.`
+      });
     }
 
     // Determine target wallet address
@@ -515,9 +547,10 @@ app.post('/api/withdraw', async (req, res) => {
 
     const currencyName = currencyId === 'bitcoin' ? 'BTC' : currencyId === 'litecoin' ? 'LTC' : (currencyId === 'usdt_bep20' ? 'USDT-BEP20' : 'USDT-TRC20');
 
-    // 0% platform fee on all profit balance withdrawals
-    const charge = 0.00;
-    const netAmount = numAmount;
+    // Dynamic platform fee configured by Admin (defaults to 5%)
+    const chargePercent = parseFloat(dwConfig.payoutCharge !== undefined ? dwConfig.payoutCharge : 5);
+    const charge = parseFloat(((numAmount * chargePercent) / 100).toFixed(2));
+    const netAmount = parseFloat(Math.max(0, numAmount - charge).toFixed(2));
 
     // Create persistent Withdrawal record
     const withdrawal = await prisma.withdrawal.create({
@@ -538,15 +571,20 @@ app.post('/api/withdraw', async (req, res) => {
         userId: user.id,
         type: 'WITHDRAWAL',
         amount: numAmount,
-        description: `Profit balance withdrawal of ${numAmount.toFixed(2)} to ${targetAddress} (${currencyName})`,
+        description: charge > 0
+          ? `Profit balance withdrawal of $${numAmount.toFixed(2)} (Fee: $${charge.toFixed(2)} [${chargePercent}%], Net: $${netAmount.toFixed(2)}) to ${targetAddress} (${currencyName})`
+          : `Profit balance withdrawal of $${numAmount.toFixed(2)} to ${targetAddress} (${currencyName})`,
         status: 'PENDING'
       }
     });
 
     return res.json({
       success: true,
-      message: `Withdrawal request for ${numAmount.toFixed(2)} submitted successfully!`,
+      message: `Withdrawal request for $${numAmount.toFixed(2)} submitted successfully! (Fee: $${charge.toFixed(2)}, Net: $${netAmount.toFixed(2)})`,
       withdrawal,
+      charge,
+      netAmount,
+      chargePercent,
       newBalance: updatedUser.balance
     });
   } catch (err) {

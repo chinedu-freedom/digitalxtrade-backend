@@ -2,7 +2,13 @@ import express from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import prisma from '../lib/prisma.js';
-import { companyDepositWallets, getActiveCompanyWallets, DEFAULT_COMPANY_WALLETS } from '../lib/store.js';
+import {
+  companyDepositWallets,
+  getActiveCompanyWallets,
+  DEFAULT_COMPANY_WALLETS,
+  getDepositWithdrawalConfig,
+  updateDepositWithdrawalConfig
+} from '../lib/store.js';
 import { sendDepositEmail, sendWithdrawalEmail, sendReferralCommissionEmail } from '../services/emailService.js';
 import { getReferralSettings, saveReferralSettings, distributeReferralCommissions } from '../services/referralService.js';
 
@@ -2749,38 +2755,19 @@ router.post('/admin/verification-password', async (req, res) => {
   }
 });
 
-// Deposit & Withdrawal limits & notices configuration
-let depositWithdrawalConfig = {
-  dailyWithdrawLimit: '5',
-  maxDailyWithdrawalAmount: '50000',
-  maxDailyBtcWithdrawal: '20000',
-  maxDailyUsdtWithdrawal: '50000',
-  maxDailyEthWithdrawal: '20000',
-  maxDailyLtcWithdrawal: '10000',
-  minDeposit: '10',
-  maxDeposit: '1000000',
-  minPayout: '10',
-  maxPayout: '50000',
-  payoutCharge: '0',
-  rechargeNotice: 'Deposit funds using our supported decentralized gateways. All payments require standard network confirmations.',
-  withdrawNotice: 'Withdrawals are processed instantly to your verified wallet address.'
-};
-
 // GET /api/public/deposit-withdrawal-settings
 router.get('/public/deposit-withdrawal-settings', (req, res) => {
-  return res.json({ success: true, settings: depositWithdrawalConfig });
+  return res.json({ success: true, settings: getDepositWithdrawalConfig() });
 });
 
 // POST /api/admin/deposit-withdrawal-settings
 router.post('/admin/deposit-withdrawal-settings', (req, res) => {
   const { settings } = req.body;
-  if (settings && typeof settings === 'object') {
-    depositWithdrawalConfig = { ...depositWithdrawalConfig, ...settings };
-  }
+  const updated = updateDepositWithdrawalConfig(settings);
   return res.json({
     success: true,
     message: 'Deposit & Withdrawal settings updated successfully!',
-    settings: depositWithdrawalConfig
+    settings: updated
   });
 });
 // ==========================================

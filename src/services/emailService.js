@@ -584,13 +584,20 @@ export const sendWithdrawalApprovedEmail = async ({ user, withdrawal }) => {
     const resetPasswordUrl = `${frontendUrl}/forgot-password`;
     const supportUrl = `${frontendUrl}/support`;
 
+    const grossAmount = parseFloat(withdrawal.amount || 0).toFixed(2);
+    const chargeFormatted = parseFloat(withdrawal.charge || 0).toFixed(2);
     const amountFormatted = parseFloat(withdrawal.netAmount || withdrawal.amount || 0).toFixed(2);
     const currency = withdrawal.currency || 'USDT-TRC20';
 
     const details = [
-      { label: 'Withdrawal Amount', value: amountFormatted },
-      { label: 'Withdrawal Currency', value: currency },
+      { label: 'Requested Amount', value: `$${grossAmount}` }
     ];
+
+    if (parseFloat(chargeFormatted) > 0) {
+      details.push({ label: 'Processing Fee', value: `$${chargeFormatted}` });
+    }
+
+    details.push({ label: 'Net Payout Transferred', value: `${amountFormatted} ${currency}` });
 
     if (withdrawal.walletAddress) {
       details.push({
