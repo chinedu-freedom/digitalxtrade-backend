@@ -465,6 +465,9 @@ router.post('/admin/users/create', async (req, res) => {
 // GET /api/admin/users/detail/:id & /api/admin/users/:id
 router.get(['/admin/users/detail/:id', '/admin/users/:id'], async (req, res) => {
   try {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
     const user = await prisma.user.findUnique({
       where: { id: req.params.id },
       include: {
@@ -671,9 +674,14 @@ const handleAdminUserUpdate = async (req, res) => {
       dataToUpdate.username = cleanUsername;
     }
 
-    if (email && email.trim()) {
-      const cleanEmail = email.toLowerCase().trim();
-      if (cleanEmail !== existingUser.email) {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+
+    if (email && String(email).trim()) {
+      const cleanEmail = String(email).toLowerCase().trim();
+      const currentEmail = (existingUser.email || '').toLowerCase().trim();
+      if (cleanEmail !== currentEmail) {
         const conflict = await prisma.user.findFirst({
           where: { email: { equals: cleanEmail, mode: 'insensitive' }, id: { not: id } }
         });
