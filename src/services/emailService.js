@@ -763,6 +763,57 @@ export const sendReferralCommissionEmail = async ({ inviter, referee, commission
 };
 
 // ==========================================
+// 5. NEW REFERRAL SIGN-UP NOTIFICATION
+// ==========================================
+
+export const sendNewReferralRegisteredEmail = async ({ inviter, referee }) => {
+  try {
+    if (!inviter || !inviter.email) return;
+    const settings = await prisma.settings.findFirst().catch(() => null);
+    const siteName = settings?.site_name || settings?.site_title || 'DigitalXTrade';
+    const siteLogo = settings?.site_logo || null;
+    const inviterName = inviter.fullName || inviter.username || 'Valued Partner';
+    const refereeIdentifier = referee?.username ? `@${referee.username}` : (referee?.fullName || referee?.email || 'A new partner');
+    const registrationDate = new Date().toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+
+    const frontendUrl = process.env.FRONTEND_URL || 'https://digitalxtrade.com';
+    const dashboardUrl = `${frontendUrl}/referrals`;
+
+    const html = renderDarkGoldTransactionEmail({
+      siteName,
+      siteLogo,
+      title: 'New Downline Referral Registered',
+      messageHtml: `Hi <b class="email-label" style="color: #0f172a;">${inviterName}</b>,<br><br>Congratulations! A new member has successfully registered an account on ${siteName} through your personal invitation link. They have been added to your Level 1 direct referral team.`,
+      details: [
+        { label: 'Referred User', value: refereeIdentifier, style: 'font-weight: 700; color: #b58117;' },
+        { label: 'Network Level', value: 'Level 1 (Direct Referral)', style: 'font-weight: 700; color: #10b981;' },
+        { label: 'Registration Date', value: registrationDate, style: 'color: #64748b;' },
+        { label: 'Status', value: 'Active Member', style: 'font-weight: 700; color: #10b981;' },
+      ],
+      buttonText: 'View Referral Network',
+      buttonUrl: dashboardUrl,
+      subNoticeText: 'Whenever this user makes a deposit or stakes cryptocurrency, you will automatically receive instant referral commissions credited directly to your account balance.'
+    });
+
+    return await sendEmail({
+      to: inviter.email,
+      subject: `New Referral Joined Your Network - ${refereeIdentifier}`,
+      html,
+      emailType: 'NEW_REFERRAL',
+      userId: inviter.id,
+    });
+  } catch (err) {
+    console.error('sendNewReferralRegisteredEmail error:', err);
+  }
+};
+
+// ==========================================
 // 4. BACKWARD COMPATIBILITY HELPERS
 // ==========================================
 

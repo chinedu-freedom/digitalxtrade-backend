@@ -3,7 +3,7 @@ import express from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import prisma from '../lib/prisma.js';
-import { sendEmail } from '../services/emailService.js';
+import { sendEmail, sendNewReferralRegisteredEmail } from '../services/emailService.js';
 
 
 export const getClientIp = (req) => {
@@ -193,9 +193,10 @@ router.post('/register', async (req, res) => {
 
     // Lookup referrer user by username, referralCode, email, or id
     let referrerId = null;
+    let referrerUser = null;
     if (referral_code && String(referral_code).trim().length > 0) {
       const cleanRef = String(referral_code).trim();
-      const referrerUser = await prisma.user.findFirst({
+      referrerUser = await prisma.user.findFirst({
         where: {
           OR: [
             { username: { equals: cleanRef, mode: 'insensitive' } },
@@ -224,7 +225,7 @@ router.post('/register', async (req, res) => {
       }
     });
 
-    // Send Welcome Email asynchronously
+    // Send Welcome Email asynchronously to the new user
     sendEmail({
       to: newUser.email,
       subject: 'Welcome to DigitalXTrade Protocol',
@@ -232,6 +233,14 @@ router.post('/register', async (req, res) => {
       emailType: 'WELCOME',
       userId: newUser.id,
     }).catch((e) => console.error('Failed sending welcome email:', e));
+
+    // Send Notification Email to the Referrer/Upline asynchronously
+    if (referrerUser && referrerUser.email) {
+      sendNewReferralRegisteredEmail({
+        inviter: referrerUser,
+        referee: newUser,
+      }).catch((e) => console.error('Failed sending referral registration email:', e));
+    }
 
     const token = jwt.sign({ id: newUser.id, email: newUser.email, role: newUser.role }, JWT_SECRET, { expiresIn: '7d' });
 
