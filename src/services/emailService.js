@@ -206,22 +206,47 @@ export const sendEmail = async ({ to, subject, html, emailType, userId }) => {
         const accessToken = await getZohoAccessToken();
         const url = `https://mail.zoho.com/api/accounts/${process.env.ZOHO_MAIL_ACCOUNT_ID}/messages`;
 
-        await axios.post(
-          url,
-          {
-            fromAddress: process.env.ZOHO_FROM_EMAIL || 'info@digitalxtrade.com',
-            toAddress: to,
-            subject: formattedSubject,
-            content: formattedHtml,
-            mailFormat: 'html',
-          },
-          {
-            headers: {
-              Authorization: `Zoho-oauthtoken ${accessToken}`,
-              'Content-Type': 'application/json',
+        let fromAddress = process.env.ZOHO_FROM_EMAIL || 'info@everstake.cx';
+        try {
+          await axios.post(
+            url,
+            {
+              fromAddress,
+              toAddress: to,
+              subject: formattedSubject,
+              content: formattedHtml,
+              mailFormat: 'html',
             },
+            {
+              headers: {
+                Authorization: `Zoho-oauthtoken ${accessToken}`,
+                'Content-Type': 'application/json',
+              },
+            }
+          );
+        } catch (postErr) {
+          if (postErr.response?.data?.data?.moreInfo?.includes?.('FromAddress') && fromAddress !== 'info@everstake.cx') {
+            console.warn(`[ZOHO MAIL] fromAddress ${fromAddress} rejected, retrying with info@everstake.cx`);
+            await axios.post(
+              url,
+              {
+                fromAddress: 'info@everstake.cx',
+                toAddress: to,
+                subject: formattedSubject,
+                content: formattedHtml,
+                mailFormat: 'html',
+              },
+              {
+                headers: {
+                  Authorization: `Zoho-oauthtoken ${accessToken}`,
+                  'Content-Type': 'application/json',
+                },
+              }
+            );
+          } else {
+            throw postErr;
           }
-        );
+        }
 
         console.log(`[ZOHO MAIL] Email sent successfully to ${to}`);
         if (userId) {
