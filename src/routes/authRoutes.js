@@ -731,7 +731,33 @@ const handleUpdateProfile = async (req, res) => {
       return res.status(400).json({ success: false, message: 'User identification required' });
     }
 
+    const existingUser = await prisma.user.findUnique({ where: { id: userId } });
+    if (!existingUser) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
     const dataToUpdate = {};
+
+    // Validate and update email
+    if (email && String(email).trim()) {
+      const cleanEmail = String(email).toLowerCase().trim();
+      const currentEmail = (existingUser.email || '').toLowerCase().trim();
+      if (cleanEmail !== currentEmail) {
+        const conflict = await prisma.user.findFirst({
+          where: {
+            email: { equals: cleanEmail, mode: 'insensitive' },
+            id: { not: userId },
+          },
+        });
+        if (conflict) {
+          return res.status(400).json({
+            success: false,
+            message: `Email ${cleanEmail} is already in use by another account.`,
+          });
+        }
+        dataToUpdate.email = cleanEmail;
+      }
+    }
 
     const nameToUse = fullName !== undefined ? fullName : full_name;
     if (nameToUse !== undefined && nameToUse !== null) {
@@ -760,9 +786,16 @@ const handleUpdateProfile = async (req, res) => {
       data: dataToUpdate,
     });
 
+    const refreshedToken = jwt.sign(
+      { id: updatedUser.id, email: updatedUser.email, role: updatedUser.role },
+      JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+
     return res.json({
       success: true,
       message: 'Personal information updated successfully',
+      token: refreshedToken,
       user: formatUser(updatedUser),
     });
   } catch (error) {
