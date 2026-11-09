@@ -84,6 +84,20 @@ const getAuthUser = async (req) => {
     } catch (e) {}
   }
 
+  // Also extract from cookies if Authorization header was not sent
+  if (!userId && req.headers.cookie) {
+    try {
+      const cookieHeader = req.headers.cookie;
+      const match = cookieHeader.match(/(?:stakelab_token|sec-prd-token|token)=([^;]+)/);
+      if (match && match[1]) {
+        const decoded = jwt.verify(match[1].trim(), JWT_SECRET);
+        if (decoded && decoded.id) {
+          userId = decoded.id;
+        }
+      }
+    } catch (e) {}
+  }
+
   if (userId) {
     try {
       const user = await prisma.user.findUnique({
@@ -628,14 +642,17 @@ app.get('/api/deposit/plans', async (req, res) => {
   try {
     const user = await getAuthUser(req);
     const userBalance = user ? parseFloat(user.balance || 0) : 0.00;
+    const userProfit = user ? parseFloat(user.profitBalance || user.profit_balance || 0) : 0.00;
+    const userDeposit = user ? parseFloat(user.depositBalance || user.deposit_balance || 0) : 0.00;
+    const totalAvailable = Math.max(userBalance, userProfit + userDeposit);
 
     let btcBal = user ? parseFloat(user.btcBalance || 0) : 0.00;
     let trcBal = user ? parseFloat(user.usdtTrc20Balance || 0) : 0.00;
     let bepBal = user ? parseFloat(user.usdtBep20Balance || 0) : 0.00;
     let ltcBal = user ? parseFloat(user.ltcBalance || 0) : 0.00;
 
-    if (btcBal + trcBal + bepBal + ltcBal === 0 && userBalance > 0) {
-      trcBal = userBalance;
+    if (btcBal + trcBal + bepBal + ltcBal === 0 && totalAvailable > 0) {
+      trcBal = totalAvailable;
     }
 
     const userBalances = {
@@ -682,7 +699,7 @@ app.get('/api/deposit/plans', async (req, res) => {
       success: true,
       plans: formattedPlans,
       wallets: activeWallets,
-      accountBalance: userBalance,
+      accountBalance: totalAvailable,
       userBalances
     });
   } catch (err) {
@@ -763,11 +780,16 @@ app.post(['/api/deposit', '/api/deposits'], async (req, res) => {
         currencyLabel = 'Litecoin';
       }
 
-      const specificBal = currencyBalanceField ? parseFloat(user[currencyBalanceField] || 0) : parseFloat(user.balance || 0);
-      if (specificBal < numAmount) {
+      const specificBal = currencyBalanceField ? parseFloat(user[currencyBalanceField] || 0) : 0;
+      const totalUserBal = parseFloat(user.balance || 0);
+      const userDeposit = parseFloat(user.depositBalance || user.deposit_balance || 0);
+      const userProfit = parseFloat(user.profitBalance || user.profit_balance || 0);
+      const totalAvailable = Math.max(specificBal, totalUserBal, userDeposit + userProfit);
+
+      if (totalAvailable < numAmount) {
         return res.status(400).json({
           success: false,
-          message: `Insufficient ${currencyLabel} balance ($${specificBal.toFixed(2)}). You requested $${numAmount.toFixed(2)}. Please choose the Crypto Topup option or select a currency with sufficient funds.`
+          message: `Insufficient balance ($${totalAvailable.toFixed(2)}). You requested $${numAmount.toFixed(2)}. Please choose the Crypto Topup option or select a currency with sufficient funds.`
         });
       }
 
@@ -777,14 +799,13 @@ app.post(['/api/deposit', '/api/deposits'], async (req, res) => {
         stakedBalance: { increment: numAmount },
         totalDeposits: { increment: numAmount }
       };
-      if (currencyBalanceField) {
+      if (currencyBalanceField && parseFloat(user[currencyBalanceField] || 0) >= numAmount) {
         updateData[currencyBalanceField] = { decrement: numAmount };
+      } else if (currencyBalanceField && parseFloat(user[currencyBalanceField] || 0) > 0) {
+        updateData[currencyBalanceField] = 0;
       }
 
       // Primary deduction from Deposit Balance (Capital Wallet). Fallback to Profit Balance if insufficient.
-      const userDeposit = parseFloat(user.depositBalance || user.deposit_balance || 0);
-      const userProfit = parseFloat(user.profitBalance || user.profit_balance || 0);
-
       const depositDeduct = Math.min(userDeposit, numAmount);
       const profitDeduct = numAmount - depositDeduct;
 
