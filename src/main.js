@@ -795,26 +795,28 @@ app.post(['/api/deposit', '/api/deposits'], async (req, res) => {
 
       // Deduct from specific currency balance & user wallet (profit/deposit), add to staked balance in PostgreSQL
       const updateData = {
-        balance: { decrement: numAmount },
         stakedBalance: { increment: numAmount },
         totalDeposits: { increment: numAmount }
       };
-      if (currencyBalanceField && parseFloat(user[currencyBalanceField] || 0) >= numAmount) {
-        updateData[currencyBalanceField] = { decrement: numAmount };
-      } else if (currencyBalanceField && parseFloat(user[currencyBalanceField] || 0) > 0) {
-        updateData[currencyBalanceField] = 0;
+
+      if (currencyBalanceField) {
+        const curVal = Math.max(0, parseFloat(user[currencyBalanceField] || 0));
+        updateData[currencyBalanceField] = Math.max(0, curVal - numAmount);
       }
 
-      // Primary deduction from Deposit Balance (Capital Wallet). Fallback to Profit Balance if insufficient.
+      // Exact deduction logic:
+      // 1. Take up to userDeposit from Deposit Balance
+      // 2. Take remaining from Profit Balance (if userDeposit is 0, full amount is deducted from profit)
       const depositDeduct = Math.min(userDeposit, numAmount);
-      const profitDeduct = numAmount - depositDeduct;
+      const profitDeduct = Math.max(0, numAmount - depositDeduct);
 
-      if (depositDeduct > 0) {
-        updateData.depositBalance = { decrement: depositDeduct };
-      }
-      if (profitDeduct > 0) {
-        updateData.profitBalance = { decrement: profitDeduct };
-      }
+      const newDepositBal = Math.max(0, userDeposit - depositDeduct);
+      const newProfitBal = Math.max(0, userProfit - profitDeduct);
+      const newTotalBal = Math.max(0, totalUserBal - numAmount);
+
+      updateData.depositBalance = newDepositBal;
+      updateData.profitBalance = newProfitBal;
+      updateData.balance = newTotalBal;
 
       const updatedUser = await prisma.user.update({
         where: { id: user.id },
@@ -865,6 +867,16 @@ app.post(['/api/deposit', '/api/deposits'], async (req, res) => {
         success: true,
         message: `Plan ${plan.name} activated successfully from account balance!`,
         newBalance: updatedUser.balance,
+        newProfitBalance: updatedUser.profitBalance,
+        newDepositBalance: updatedUser.depositBalance,
+        user: {
+          id: updatedUser.id,
+          balance: Number(updatedUser.balance || 0),
+          profitBalance: Number(updatedUser.profitBalance || 0),
+          depositBalance: Number(updatedUser.depositBalance || 0),
+          stakedBalance: Number(updatedUser.stakedBalance || 0),
+          totalDeposits: Number(updatedUser.totalDeposits || 0),
+        },
         order: depositOrder,
         deposit: depositOrder
       });
@@ -1352,6 +1364,10 @@ app.get('/api/user/dashboard', async (req, res) => {
         username: activeUser.username,
         fullName: activeUser.fullName,
         balance: parseFloat(activeUser.balance || 0),
+        depositBalance: parseFloat(activeUser.depositBalance || 0),
+        deposit_balance: parseFloat(activeUser.depositBalance || 0),
+        profitBalance: parseFloat(activeUser.profitBalance || 0),
+        profit_balance: parseFloat(activeUser.profitBalance || 0),
         btcBalance: parseFloat(activeUser.btcBalance || 0),
         usdtTrc20Balance: parseFloat(activeUser.usdtTrc20Balance || 0),
         usdtBep20Balance: parseFloat(activeUser.usdtBep20Balance || 0),
@@ -1365,6 +1381,10 @@ app.get('/api/user/dashboard', async (req, res) => {
       },
       data: {
         balance: parseFloat(activeUser.balance || 0),
+        depositBalance: parseFloat(activeUser.depositBalance || 0),
+        deposit_balance: parseFloat(activeUser.depositBalance || 0),
+        profitBalance: parseFloat(activeUser.profitBalance || 0),
+        profit_balance: parseFloat(activeUser.profitBalance || 0),
         btcBalance: parseFloat(activeUser.btcBalance || 0),
         usdtTrc20Balance: parseFloat(activeUser.usdtTrc20Balance || 0),
         usdtBep20Balance: parseFloat(activeUser.usdtBep20Balance || 0),
