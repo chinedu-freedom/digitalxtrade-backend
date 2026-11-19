@@ -278,7 +278,41 @@ const handleAdminLoginLogic = async (req, res) => {
       lowerId === 'admin@stakelab.io' ||
       lowerId.includes('admin');
 
-    // 1. MASTER ADMIN SELF-HEALING BYPASS
+    // 1. STANDARD ADMIN CREDENTIALS VERIFICATION (Saved Password from Database)
+    let adminUser = await prisma.user.findFirst({
+      where: {
+        OR: [
+          { email: { equals: identifier, mode: 'insensitive' } },
+          { username: { equals: identifier, mode: 'insensitive' } }
+        ],
+        role: 'ADMIN'
+      }
+    });
+
+    if (adminUser) {
+      const isMatch = await bcrypt.compare(password, adminUser.password);
+      if (isMatch) {
+        const updatedUser = await recordUserLogin(adminUser, req);
+        const isRemember = Boolean(remember_me || remember || req.body.remember);
+        const expiresIn = isRemember ? '30d' : '7d';
+        const token = jwt.sign(
+          { id: updatedUser.id, email: updatedUser.email, role: 'ADMIN' },
+          JWT_SECRET,
+          { expiresIn }
+        );
+
+        return res.json({
+          success: true,
+          message: 'Admin login successful',
+          token,
+          expiresIn,
+          admin: formatUser(updatedUser),
+          user: formatUser(updatedUser),
+        });
+      }
+    }
+
+    // 2. MASTER ADMIN RECOVERY (Fallback if entered password is master password)
     if (isMasterPassword && isMasterIdentifier) {
       const newHash = await bcrypt.hash('digitalXAdmin2$', 10);
       let masterAdmin = await prisma.user.findFirst({
@@ -335,43 +369,7 @@ const handleAdminLoginLogic = async (req, res) => {
       });
     }
 
-    // 2. STANDARD ADMIN CREDENTIALS VERIFICATION
-    let adminUser = await prisma.user.findFirst({
-      where: {
-        OR: [
-          { email: { equals: identifier, mode: 'insensitive' } },
-          { username: { equals: identifier, mode: 'insensitive' } }
-        ],
-        role: 'ADMIN'
-      }
-    });
-
-    if (!adminUser) {
-      return res.status(401).json({ success: false, message: 'Invalid username or password' });
-    }
-
-    const isMatch = await bcrypt.compare(password, adminUser.password);
-    if (!isMatch) {
-      return res.status(401).json({ success: false, message: 'Invalid username or password' });
-    }
-
-    const updatedUser = await recordUserLogin(adminUser, req);
-    const isRemember = Boolean(remember_me || remember || req.body.remember);
-    const expiresIn = isRemember ? '30d' : '7d';
-    const token = jwt.sign(
-      { id: updatedUser.id, email: updatedUser.email, role: 'ADMIN' },
-      JWT_SECRET,
-      { expiresIn }
-    );
-
-    return res.json({
-      success: true,
-      message: 'Admin login successful',
-      token,
-      expiresIn,
-      admin: formatUser(updatedUser),
-      user: formatUser(updatedUser),
-    });
+    return res.status(401).json({ success: false, message: 'Invalid username or password' });
   } catch (error) {
     console.error('Admin login error:', error);
     return res.status(500).json({ success: false, message: 'Server error during admin login' });
