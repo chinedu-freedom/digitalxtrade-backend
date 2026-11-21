@@ -18,21 +18,40 @@ async function main() {
 
   if (rogueAdmins.length === 0) {
     console.log(`✓ Database is clean! Only ${keepEmail} has ADMIN role.`);
-    return;
+  } else {
+    console.log(`[CLEANUP] Found ${rogueAdmins.length} unauthorized admin account(s):`);
+    for (const a of rogueAdmins) {
+      console.log(` - Demoting/Revoking rogue admin: ID=${a.id}, Email=${a.email}, Username=${a.username}`);
+      await prisma.user.update({
+        where: { id: a.id },
+        data: { role: 'USER', isSuspended: true }
+      });
+    }
   }
 
-  console.log(`[CLEANUP] Found ${rogueAdmins.length} unauthorized admin account(s):`);
-  for (const a of rogueAdmins) {
-    console.log(` - Demoting/Revoking rogue admin: ID=${a.id}, Email=${a.email}, Username=${a.username}`);
+  // Ensure the primary whitelisted admin is unsuspended and confirmed as ADMIN
+  const primaryAdmin = await prisma.user.findFirst({
+    where: {
+      email: { equals: keepEmail, mode: 'insensitive' }
+    }
+  });
+
+  if (primaryAdmin) {
     await prisma.user.update({
-      where: { id: a.id },
-      data: { role: 'USER', isSuspended: true }
+      where: { id: primaryAdmin.id },
+      data: {
+        role: 'ADMIN',
+        isSuspended: false,
+        isEmailVerified: true
+      }
     });
+    console.log(`✓ Confirmed primary admin ${keepEmail} is ACTIVE (isSuspended: false, role: ADMIN).`);
+  } else {
+    console.warn(`[WARNING] Primary admin account ${keepEmail} was not found in database. Run seedAdmin.js to create it.`);
   }
 
   console.log('--------------------------------------------------');
-  console.log(`✓ Successfully demoted and suspended ${rogueAdmins.length} rogue admin account(s)!`);
-  console.log(`✓ ONLY ${keepEmail} remains with role: ADMIN.`);
+  console.log(`✓ Database cleaned! ONLY ${keepEmail} remains with role: ADMIN.`);
   console.log('--------------------------------------------------');
 }
 

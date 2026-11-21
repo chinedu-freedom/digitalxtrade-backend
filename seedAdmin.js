@@ -44,6 +44,7 @@ async function main() {
         fullName: fullName,
         password: passwordHash,
         role: 'ADMIN',
+        isSuspended: false,
         isEmailVerified: true,
       }
     });
@@ -56,6 +57,7 @@ async function main() {
         fullName: fullName,
         password: passwordHash,
         role: 'ADMIN',
+        isSuspended: false,
         isEmailVerified: true,
       }
     });
