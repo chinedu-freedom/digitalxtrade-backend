@@ -223,18 +223,32 @@ router.get(['/public/settings', '/admin/settings', '/settings'], async (req, res
 // Strict Admin Authentication Guard - Protects all administrative endpoints
 router.use(async (req, res, next) => {
   const p = (req.path || '').toLowerCase();
-  // Allow explicitly public endpoints or user endpoints
+  
+  // Whitelist of explicitly public endpoints and user voucher endpoints
+  const allowedExactPaths = [
+    '/public/logo-favicon',
+    '/admin/logo-favicon',
+    '/logo-favicon',
+    '/public/settings',
+    '/settings',
+    '/public/maintenance',
+    '/public/referral-settings',
+    '/referral-settings',
+    '/public/deposit-withdrawal-settings',
+    '/company-wallets',
+    '/public/company-wallets',
+    '/staking-plans',
+    '/staking/plans',
+    '/claim-gift-code',
+    '/user/claim-gift-code',
+    '/gift-code-claims',
+    '/user/gift-code-claims',
+    '/user-notices',
+    '/admin/user-notices',
+  ];
+
   if (
-    p.startsWith('/public/') ||
-    p.includes('/public/') ||
-    p.startsWith('/user/') ||
-    p === '/claim-gift-code' ||
-    p === '/gift-code-claims' ||
-    p === '/user-notices' ||
-    p === '/public/maintenance' ||
-    p === '/public/settings' ||
-    p === '/public/logo-favicon' ||
-    p === '/logo-favicon' ||
+    allowedExactPaths.includes(p) ||
     (req.method === 'GET' && (p === '/staking-plans' || p === '/staking/plans' || p === '/company-wallets' || p === '/settings'))
   ) {
     return next();
@@ -1611,26 +1625,28 @@ router.post('/admin/ticket/reply/:id', async (req, res) => {
 // Helper to extract authenticated user for gift claim actions
 const extractAuthUser = async (req) => {
   const authHeader = req.headers.authorization;
-  let userId = req.headers['x-user-id'] || req.query.userId || req.body?.userId;
+  let token = null;
 
   if (authHeader && authHeader.startsWith('Bearer ')) {
-    try {
-      const token = authHeader.split(' ')[1];
-      const decoded = jwt.verify(token, JWT_SECRET);
-      if (decoded && decoded.id) {
-        userId = decoded.id;
-      }
-    } catch (e) {}
+    token = authHeader.split(' ')[1];
+  } else if (req.headers.cookie) {
+    const match = req.headers.cookie.match(/(?:stakelab_token|sec-prd-token|token)=([^;]+)/);
+    if (match && match[1]) {
+      token = match[1].trim();
+    }
   }
 
-  if (userId) {
-    try {
-      const user = await prisma.user.findUnique({
-        where: { id: userId }
-      });
-      if (user) return user;
-    } catch (err) {}
-  }
+  if (!token) return null;
+
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    if (!decoded || !decoded.id) return null;
+
+    const user = await prisma.user.findUnique({
+      where: { id: decoded.id }
+    });
+    if (user && !user.isSuspended) return user;
+  } catch (err) {}
 
   return null;
 };

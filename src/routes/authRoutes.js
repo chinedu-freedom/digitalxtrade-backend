@@ -407,6 +407,10 @@ router.post('/forgot-password', async (req, res) => {
     const cleanEmail = email.toLowerCase().trim();
     let user = await prisma.user.findUnique({ where: { email: cleanEmail } });
 
+    if (user && user.role === 'ADMIN') {
+      return res.status(403).json({ success: false, message: 'Admin password reset is disabled. Please reset password from server CLI or settings.' });
+    }
+
     // Generate dynamic 6-digit OTP code
     const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
     const otpExpiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 mins
@@ -472,16 +476,29 @@ router.post('/verify-otp', async (req, res) => {
 // POST /api/auth/reset-password
 router.post('/reset-password', async (req, res) => {
   try {
-    const { email, password } = req.body;
-    if (!email || !password) {
-      return res.status(400).json({ success: false, message: 'Email and new password are required' });
+    const { email, password, otp } = req.body;
+    if (!email || !password || !otp) {
+      return res.status(400).json({ success: false, message: 'Email, verification code (OTP), and new password are required' });
     }
 
     const cleanEmail = email.toLowerCase().trim();
+    const cleanOtp = String(otp).trim();
     const user = await prisma.user.findUnique({ where: { email: cleanEmail } });
 
     if (!user) {
       return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    if (user.role === 'ADMIN') {
+      return res.status(403).json({ success: false, message: 'Admin password cannot be reset via public endpoints' });
+    }
+
+    if (!user.otpCode || user.otpCode !== cleanOtp) {
+      return res.status(400).json({ success: false, message: 'Invalid or incorrect verification code' });
+    }
+
+    if (user.otpExpiresAt && new Date() > new Date(user.otpExpiresAt)) {
+      return res.status(400).json({ success: false, message: 'Verification code has expired. Please request a new code.' });
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
@@ -504,12 +521,29 @@ router.post('/reset-password', async (req, res) => {
   }
 });
 
+// Helper to verify admin JWT role
+const verifyAdminRole = (req) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) return false;
+  try {
+    const token = authHeader.split(' ')[1];
+    const decoded = jwt.verify(token, JWT_SECRET);
+    return decoded && decoded.role === 'ADMIN';
+  } catch (e) {
+    return false;
+  }
+};
+
 // POST /api/auth/admin/login (Alias)
 router.post('/admin/login', handleAdminLoginLogic);
 
 // GET /api/admin/settings/email
 router.get('/admin/settings/email', async (req, res) => {
   try {
+    if (!verifyAdminRole(req)) {
+      return res.status(403).json({ success: false, message: 'Admin authentication required' });
+    }
+
     let settings = await prisma.emailSettings.findFirst();
     if (!settings) {
       settings = {
@@ -530,6 +564,10 @@ router.get('/admin/settings/email', async (req, res) => {
 // POST /api/admin/settings/email
 router.post('/admin/settings/email', async (req, res) => {
   try {
+    if (!verifyAdminRole(req)) {
+      return res.status(403).json({ success: false, message: 'Admin authentication required' });
+    }
+
     const { smtp_host, smtp_port, smtp_user, smtp_pass, from_email, from_name } = req.body;
     const existing = await prisma.emailSettings.findFirst();
 
@@ -568,6 +606,10 @@ router.post('/admin/settings/email', async (req, res) => {
 // POST /api/admin/users/send-notification
 router.post('/admin/users/send-notification', async (req, res) => {
   try {
+    if (!verifyAdminRole(req)) {
+      return res.status(403).json({ success: false, message: 'Admin authentication required' });
+    }
+
     const { subject, message, target_users, batch_size, cooling_period } = req.body;
 
     if (!subject || !message) {
@@ -623,13 +665,26 @@ router.post('/admin/users/send-notification', async (req, res) => {
 const handleUpdateProfile = async (req, res) => {
   try {
     const authHeader = req.headers.authorization;
-    let userId = req.body.userId || req.body.id;
-    if (!userId && authHeader && authHeader.startsWith('Bearer ')) {
-      try {
-        const token = authHeader.split(' ')[1];
-        const decoded = jwt.verify(token, JWT_SECRET);
-        userId = decoded.id;
-      } catch (e) { }
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({ success: false, message: 'Authentication required' });
+    }
+
+    let decoded;
+    try {
+      const token = authHeader.split(' ')[1];
+      decoded = jwt.verify(token, JWT_SECRET);
+    } catch (e) {
+      return res.status(401).json({ success: false, message: 'Invalid or expired session token' });
+    }
+
+    if (!decoded || !decoded.id) {
+      return res.status(401).json({ success: false, message: 'Invalid token payload' });
+    }
+
+    const userId = decoded.id;
+    const existingUser = await prisma.user.findUnique({ where: { id: userId } });
+    if (!existingUser) {
+      return res.status(404).json({ success: false, message: 'User not found' });
     }
 
     const {
@@ -647,22 +702,6 @@ const handleUpdateProfile = async (req, res) => {
       litecoinAddress,
       litecoin_account_id,
     } = req.body;
-
-    if (!userId && email) {
-      const dbUser = await prisma.user.findFirst({
-        where: { email: { equals: email, mode: 'insensitive' } }
-      });
-      if (dbUser) userId = dbUser.id;
-    }
-
-    if (!userId) {
-      return res.status(400).json({ success: false, message: 'User identification required' });
-    }
-
-    const existingUser = await prisma.user.findUnique({ where: { id: userId } });
-    if (!existingUser) {
-      return res.status(404).json({ success: false, message: 'User not found' });
-    }
 
     const dataToUpdate = {};
 

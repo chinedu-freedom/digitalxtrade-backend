@@ -133,6 +133,10 @@ const getOrCreateSecuritySettings = async () => {
 // GET current security settings
 app.get('/api/security', async (req, res) => {
   try {
+    const user = await getAuthUser(req);
+    if (!user) {
+      return res.status(401).json({ success: false, message: 'Authentication required' });
+    }
     const settings = await getOrCreateSecuritySettings();
     return res.json({
       success: true,
@@ -146,6 +150,10 @@ app.get('/api/security', async (req, res) => {
 // POST update security settings (IP Sensitivity and Browser Change)
 app.post('/api/security/settings', async (req, res) => {
   try {
+    const user = await getAuthUser(req);
+    if (!user) {
+      return res.status(401).json({ success: false, message: 'Authentication required' });
+    }
     const { ipSensitivity, browserChange } = req.body;
     let settings = await getOrCreateSecuritySettings();
 
@@ -179,6 +187,10 @@ app.post('/api/security/settings', async (req, res) => {
 // POST enable 2FA
 app.post('/api/security/2fa/enable', async (req, res) => {
   try {
+    const user = await getAuthUser(req);
+    if (!user) {
+      return res.status(401).json({ success: false, message: 'Authentication required' });
+    }
     const code = req.body.token || req.body.code;
     const secret = req.body.secretCode || req.body.secret;
 
@@ -215,6 +227,10 @@ app.post('/api/security/2fa/enable', async (req, res) => {
 // POST disable 2FA
 app.post('/api/security/2fa/disable', async (req, res) => {
   try {
+    const user = await getAuthUser(req);
+    if (!user) {
+      return res.status(401).json({ success: false, message: 'Authentication required' });
+    }
     let settings = await getOrCreateSecuritySettings();
 
     settings = await prisma.securitySetting.update({
@@ -1163,10 +1179,19 @@ app.get(['/api/deposit/status/:id', '/api/deposits/status/:id'], async (req, res
 // POST confirm deposit with TXID
 app.post('/api/deposit/confirm', async (req, res) => {
   try {
+    const user = await getAuthUser(req);
+    if (!user) {
+      return res.status(401).json({ success: false, message: 'Authentication required' });
+    }
+
     const { orderId, txHash } = req.body;
     const deposit = await prisma.deposit.findUnique({ where: { id: orderId } });
     if (!deposit) {
       return res.status(404).json({ success: false, message: 'Deposit order not found.' });
+    }
+
+    if (deposit.userId !== user.id && user.role !== 'ADMIN') {
+      return res.status(403).json({ success: false, message: 'Unauthorized: You do not own this deposit order.' });
     }
 
     const updated = await prisma.deposit.update({
@@ -1177,7 +1202,6 @@ app.post('/api/deposit/confirm', async (req, res) => {
         adminNote: `User submitted TXID: ${txHash}`
       }
     });
-
 
     return res.json({
       success: true,
@@ -1193,11 +1217,12 @@ app.post('/api/deposit/confirm', async (req, res) => {
 app.get(['/api/transactions', '/api/user/transactions'], async (req, res) => {
   try {
     const user = await getAuthUser(req);
-    const userId = user ? user.id : req.query.userId;
+    if (!user) {
+      return res.status(401).json({ success: false, message: 'Authentication required' });
+    }
 
-    const whereClause = userId ? { userId } : {};
     const transactions = await prisma.transaction.findMany({
-      where: whereClause,
+      where: { userId: user.id },
       orderBy: { createdAt: 'desc' }
     });
 
