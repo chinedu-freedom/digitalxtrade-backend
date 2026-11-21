@@ -220,6 +220,64 @@ router.get(['/public/settings', '/admin/settings', '/settings'], async (req, res
   }
 });
 
+// Strict Admin Authentication Guard - Protects all administrative endpoints
+router.use(async (req, res, next) => {
+  const p = (req.path || '').toLowerCase();
+  // Allow explicitly public endpoints or user endpoints
+  if (
+    p.startsWith('/public/') ||
+    p.includes('/public/') ||
+    p.startsWith('/user/') ||
+    p === '/claim-gift-code' ||
+    p === '/gift-code-claims' ||
+    p === '/user-notices' ||
+    p === '/public/maintenance' ||
+    p === '/public/settings' ||
+    p === '/public/logo-favicon' ||
+    p === '/logo-favicon' ||
+    (req.method === 'GET' && (p === '/staking-plans' || p === '/staking/plans' || p === '/company-wallets' || p === '/settings'))
+  ) {
+    return next();
+  }
+
+  // All administrative endpoints require a valid, verified JWT signed token with role: ADMIN
+  let token = null;
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    token = authHeader.split(' ')[1];
+  } else if (req.headers.cookie) {
+    const match = req.headers.cookie.match(/(?:stakelab_admin_token|sec-admin-token|digital_admin_token)=([^;]+)/);
+    if (match && match[1]) {
+      token = match[1].trim();
+    }
+  }
+
+  if (!token) {
+    return res.status(401).json({ success: false, message: 'Admin authorization required' });
+  }
+
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    if (!decoded || !decoded.id) {
+      return res.status(401).json({ success: false, message: 'Invalid admin token' });
+    }
+
+    const adminUser = await prisma.user.findFirst({
+      where: { id: decoded.id, role: 'ADMIN' }
+    });
+
+    if (!adminUser || adminUser.isSuspended) {
+      return res.status(403).json({ success: false, message: 'Unauthorized: Admin privileges required' });
+    }
+
+    req.admin = adminUser;
+    req.user = adminUser;
+    next();
+  } catch (err) {
+    return res.status(401).json({ success: false, message: 'Admin session expired or invalid' });
+  }
+});
+
 // GET /api/admin/stats & GET /api/admin/dashboard
 const handleGetStats = async (req, res) => {
   try {

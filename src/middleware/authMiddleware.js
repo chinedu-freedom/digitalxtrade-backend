@@ -24,16 +24,11 @@ export const authenticateUser = async (req, res, next) => {
       }
     }
 
-    // Fallback if userId passed in query or headers
-    if (!userId) {
-      userId = req.headers['x-user-id'] || req.query.userId;
-    }
-
     if (userId) {
       const user = await prisma.user.findUnique({
         where: { id: userId }
       });
-      if (user) {
+      if (user && !user.isSuspended) {
         req.user = user;
         return next();
       }
@@ -44,6 +39,7 @@ export const authenticateUser = async (req, res, next) => {
     next();
   } catch (error) {
     console.error('Auth middleware error:', error);
+    req.user = null;
     next();
   }
 };
@@ -51,6 +47,13 @@ export const authenticateUser = async (req, res, next) => {
 export const requireAuth = (req, res, next) => {
   if (!req.user) {
     return res.status(401).json({ success: false, message: 'Authentication required' });
+  }
+  next();
+};
+
+export const requireAdmin = (req, res, next) => {
+  if (!req.user || req.user.role !== 'ADMIN') {
+    return res.status(403).json({ success: false, message: 'Admin access forbidden' });
   }
   next();
 };

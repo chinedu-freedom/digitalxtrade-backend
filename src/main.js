@@ -72,59 +72,42 @@ app.get('/api/health', (req, res) => {
 // Helper to extract authenticated user from request
 const getAuthUser = async (req) => {
   const authHeader = req.headers.authorization;
-  let userId = req.headers['x-user-id'] || req.query.userId;
+  let token = null;
 
   if (authHeader && authHeader.startsWith('Bearer ')) {
-    try {
-      const token = authHeader.split(' ')[1];
-      const decoded = jwt.verify(token, JWT_SECRET);
-      if (decoded && decoded.id) {
-        userId = decoded.id;
-      }
-    } catch (e) {}
-  }
-
-  // Also extract from cookies if Authorization header was not sent
-  if (!userId && req.headers.cookie) {
-    try {
-      const cookieHeader = req.headers.cookie;
-      const match = cookieHeader.match(/(?:stakelab_token|sec-prd-token|token)=([^;]+)/);
-      if (match && match[1]) {
-        const decoded = jwt.verify(match[1].trim(), JWT_SECRET);
-        if (decoded && decoded.id) {
-          userId = decoded.id;
-        }
-      }
-    } catch (e) {}
-  }
-
-  if (userId) {
-    try {
-      const user = await prisma.user.findUnique({
-        where: { id: userId },
-        include: {
-          deposits: { orderBy: { createdAt: 'desc' } },
-          withdrawals: { orderBy: { createdAt: 'desc' } },
-          transactions: { orderBy: { createdAt: 'desc' } }
-        }
-      });
-      return user;
-    } catch (err) {
-      console.warn('Database user fetch error:', err.message);
+    token = authHeader.split(' ')[1];
+  } else if (req.headers.cookie) {
+    const cookieHeader = req.headers.cookie;
+    const match = cookieHeader.match(/(?:stakelab_token|sec-prd-token|token)=([^;]+)/);
+    if (match && match[1]) {
+      token = match[1].trim();
     }
   }
 
-  // Fallback to first USER in database if development testing without token
+  if (!token) {
+    return null;
+  }
+
   try {
-    const firstUser = await prisma.user.findFirst({
-      where: { role: 'USER' },
+    const decoded = jwt.verify(token, JWT_SECRET);
+    if (!decoded || !decoded.id) {
+      return null;
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: decoded.id },
       include: {
         deposits: { orderBy: { createdAt: 'desc' } },
         withdrawals: { orderBy: { createdAt: 'desc' } },
         transactions: { orderBy: { createdAt: 'desc' } }
       }
     });
-    return firstUser;
+
+    if (!user || user.isSuspended) {
+      return null;
+    }
+
+    return user;
   } catch (err) {
     return null;
   }
