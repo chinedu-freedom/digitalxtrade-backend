@@ -224,10 +224,11 @@ router.get(['/public/settings', '/admin/settings', '/settings'], async (req, res
 router.use(async (req, res, next) => {
   const p = (req.path || '').toLowerCase();
   
-  // Whitelist of explicitly public endpoints and user voucher endpoints
-  const allowedExactPaths = [
-    '/public/logo-favicon',
+  // Public admin paths that do not require authentication
+  const publicAdminPaths = [
     '/admin/logo-favicon',
+    '/admin/settings',
+    '/public/logo-favicon',
     '/logo-favicon',
     '/public/settings',
     '/settings',
@@ -248,9 +249,39 @@ router.use(async (req, res, next) => {
   ];
 
   if (
-    allowedExactPaths.includes(p) ||
-    (req.method === 'GET' && (p === '/staking-plans' || p === '/staking/plans' || p === '/company-wallets' || p === '/settings'))
+    publicAdminPaths.includes(p) ||
+    (req.method === 'GET' && (p === '/staking-plans' || p === '/staking/plans' || p === '/company-wallets' || p === '/settings' || p === '/admin/user-notices'))
   ) {
+    return next();
+  }
+
+  // Check if this route is an administrative endpoint
+  const isAdminEndpoint =
+    p.startsWith('/admin') ||
+    p.startsWith('/users/') ||
+    p === '/users' ||
+    (req.method !== 'GET' && (
+      p === '/staking-plans' ||
+      p === '/staking/plans' ||
+      p === '/company-wallets' ||
+      p === '/company-wallets/reset' ||
+      p === '/referral-settings' ||
+      p === '/general-setting' ||
+      p === '/logo-favicon' ||
+      p === '/maintenance-mode' ||
+      p === '/password' ||
+      p === '/verification-password' ||
+      p === '/deposit-withdrawal-settings' ||
+      p === '/earning-holidays' ||
+      p.startsWith('/earning-holidays/') ||
+      p === '/user-notices' ||
+      p.startsWith('/user-notices/') ||
+      p === '/gift-codes' ||
+      p.startsWith('/gift-codes/')
+    ));
+
+  // If this is NOT an admin endpoint (e.g., user deposit, withdraw, dashboard, etc.), pass through to user handlers!
+  if (!isAdminEndpoint) {
     return next();
   }
 
